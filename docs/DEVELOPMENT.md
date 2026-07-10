@@ -1,0 +1,63 @@
+# Local Development Environment
+
+## Prerequisites
+
+| Tool | Version | Notes |
+|------|---------|-------|
+| Python | 3.11.x | backend + pipeline |
+| Node.js | ≥ 20 LTS | viewer (and dashboard later) |
+| npm | ≥ 10 | ships with Node 20 |
+| Git | any recent | |
+
+Optional (needed from Phase M4–6 onward): PDAL (system package), Blender ≥ 4.x (headless), Docker (PostgreSQL 16, Redis).
+
+## Workflow
+
+1. Changes are committed directly to `main` (no MRs, no feature branches).
+2. You `git pull`, run, test and validate locally.
+3. Once validated, the corresponding checkbox in `PLAN.md` is checked and the changelog updated.
+
+## Viewer (`viewer/`)
+
+```bash
+cd viewer
+npm install
+npm run dev        # http://localhost:5173
+npm run typecheck  # strict TS check
+npm run build      # production build
+```
+
+The HUD (top-left) shows the active render backend — **WEBGPU** on supported browsers
+(Chrome/Edge ≥ 113, recent Firefox), **WEBGL2** otherwise. Verify both paths when possible.
+
+## Backend (`backend/`)
+
+```bash
+cd backend
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -e ".[dev]"
+uvicorn app.main:app --reload    # http://127.0.0.1:8000, docs at /docs
+pytest                           # run tests
+ruff check . && mypy app         # lint + typecheck
+```
+
+Settings are environment-driven with the `VS_` prefix (see `app/config.py`), e.g. `VS_ENVIRONMENT=production`.
+
+## Pipeline (`pipeline/`)
+
+```bash
+cd pipeline
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+pytest
+```
+
+Note: the `pointcloud` extra (`pip install -e ".[pointcloud]"`) requires PDAL installed
+at the system level. Not needed until Phase M4–6 (stage G1).
+
+## Conventions
+
+- Python: `ruff` (line length 100), `mypy` strict-ish, `pytest` for everything testable.
+- TypeScript: `strict: true`, no `any`, tree-shaken `@babylonjs/core/*` scoped imports only.
+- All world-space math in the runtime Y-up frame; conversion from Matterport Z-up happens exactly once, at ingestion (Coordinate Lock Rule).
+- No heavy binary assets in git — scan data and processed assets live in object storage.

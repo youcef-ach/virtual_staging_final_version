@@ -197,3 +197,4 @@ Raw exports immutable in `/raw/{property_id}/{version}/`.
 | Date | Change |
 |------|--------|
 | 2026-07-10 | Plan committed. Phase M1–3 Foundation started. Next step: **F1 project scaffolding**, then **F2 E57 parser + pose extractor**. |
+| 2026-07-10 | **F1 implemented** — repo layout (`backend/`, `pipeline/`, `viewer/`, `dashboard/` placeholder, `docs/`), FastAPI app + health endpoint + tests, `vs_pipeline` package skeleton, Vite/React 19/Zustand/Babylon.js viewer with WebGPU→WebGL2 fallback and FPS HUD, dev docs. **Awaiting local validation** before F1 boxes are checked. Next: **F2**. |
