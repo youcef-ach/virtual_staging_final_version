@@ -55,11 +55,11 @@ lightweight streaming web viewer.
 
 > **Milestone:** pixel-accurate overlay on the two-story-home scan, then the 50-scan set.
 
-- [ ] **F1. Project scaffolding**
-  - [ ] F1.1 Repo layout (`backend/`, `pipeline/`, `viewer/`, `dashboard/`, `docs/`)
-  - [ ] F1.2 Python project setup (Python 3.11, pyproject, deps: pye57, numpy, opencv, trimesh, pdal bindings)
-  - [ ] F1.3 Viewer project setup (TypeScript + Vite, Babylon.js 9.0, React 19 + Zustand shell)
-  - [ ] F1.4 Local dev environment docs (how to run everything on your machine)
+- [x] **F1. Project scaffolding** ✅ *validated locally 2026-07-10*
+  - [x] F1.1 Repo layout (`backend/`, `pipeline/`, `viewer/`, `dashboard/`, `docs/`)
+  - [x] F1.2 Python project setup (Python 3.11, pyproject, deps: pye57, numpy, opencv, trimesh, pdal bindings)
+  - [x] F1.3 Viewer project setup (TypeScript + Vite, Babylon.js 9.0, React 19 + Zustand shell)
+  - [x] F1.4 Local dev environment docs (how to run everything on your machine)
 - [ ] **F2. E57 parser + pose extractor** *(first ticket)*
   - [ ] F2.1 Read `.e57`: enumerate sweeps, extract per-sweep 4×4 pose matrices (pye57)
   - [ ] F2.2 Apply the coordinate conversion (Z-up → Y-up) exactly once, at ingestion
