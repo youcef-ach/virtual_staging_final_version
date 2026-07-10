@@ -1,0 +1,199 @@
+# Virtual Staging Platform — Master Plan & Progress Tracker
+
+> **How this file works:** every step has a checkbox. When a step is implemented on GitLab,
+> pulled locally, run, tested and **validated by you**, it gets checked `[x]`.
+> Sub-steps may be added as we go, but the structure and decisions below are locked.
+>
+> **Workflow:** simple, step by step. Duo implements & commits directly to `main` →
+> you pull, run, test, validate → we check the box → next step. No MRs, no branches.
+
+---
+
+## 0. Locked Decisions (Reference — do not reopen)
+
+| # | Decision | Choice |
+|---|----------|--------|
+| 1 | Renderer | Babylon.js 9.0, WebGPU-native, WebGL2 fallback |
+| 2 | v1 staging | Add-only (no material swaps, no room emptying) |
+| 3 | Inpainting | Year 2 fast-follow |
+| 4 | Segmentation | 2D-first (Mask2Former + SAM), fused with 3D, runs in v1 |
+| 5 | BIM | Year 2 module; supporting invariants active from day 1 |
+| 6 | Proxy mesh | Plane-intersection shell + OBJ-clipped non-planar details |
+| 7 | Transitions | Projective morphing with adaptive stretching + velocity blur |
+| 8 | Catalog | Curated in-house glTF, monetization-ready metadata schema |
+| 9 | Dollhouse | Textured Matterpak OBJ |
+| 10 | Pose QA | Automated edge-overlap score, human review on alert + spot checks |
+| 11 | Physics | Havok WASM (Babylon plugin) |
+| 12 | Timeline | 12 months, HSSE acceptance metrics |
+
+---
+
+## 1. Architecture Overview (Reference)
+
+Three synchronized runtime layers:
+
+1. **Photographic layer** — per-sweep 4K cubemap (6 KTX2 faces), rendered as skybox, never altered. *Visual truth.*
+2. **Geometric layer** — invisible proxy mesh (depth-write occlusion, collision, shadow catching) + parametric planes (`structural_planes` table). *Metric truth from E57.*
+3. **Dynamic asset layer** — Draco-compressed glTF 2.0 furniture, PBR, lit by per-sweep IBL.
+
+**Coordinate Lock Rule (hard invariant):** the E57 origin `(0,0,0)` is preserved unchanged
+through every stage. All poses, planes, and placements are expressed in this single frame.
+One fixed conversion applied at ingestion, Matterport Z-up → runtime Y-up:
+
+```
+X_rt = X_mp,   Y_rt = Z_mp,   Z_rt = -Y_mp
+```
+
+**Split:** heavy compute offline (Python GPU workers, idempotent DAG); runtime is a
+lightweight streaming web viewer.
+
+---
+
+## 2. Progress Tracker
+
+### Phase M1–3 · Foundation  ⟵ **CURRENT PHASE**
+
+> **Milestone:** pixel-accurate overlay on the two-story-home scan, then the 50-scan set.
+
+- [ ] **F1. Project scaffolding**
+  - [ ] F1.1 Repo layout (`backend/`, `pipeline/`, `viewer/`, `dashboard/`, `docs/`)
+  - [ ] F1.2 Python project setup (Python 3.11, pyproject, deps: pye57, numpy, opencv, trimesh, pdal bindings)
+  - [ ] F1.3 Viewer project setup (TypeScript + Vite, Babylon.js 9.0, React 19 + Zustand shell)
+  - [ ] F1.4 Local dev environment docs (how to run everything on your machine)
+- [ ] **F2. E57 parser + pose extractor** *(first ticket)*
+  - [ ] F2.1 Read `.e57`: enumerate sweeps, extract per-sweep 4×4 pose matrices (pye57)
+  - [ ] F2.2 Apply the coordinate conversion (Z-up → Y-up) exactly once, at ingestion
+  - [ ] F2.3 Emit `poses.json` (sweep UUID → 4×4 matrix, runtime frame)
+  - [ ] F2.4 Unit tests: round-trip conversion, origin preservation invariant
+- [ ] **F3. Ingestion & versioning API**
+  - [ ] F3.1 PostgreSQL 16 schema — initial migration (`organizations`, `users`, `properties`, `scan_versions`, `scan_positions`, `structural_planes`, `navigation_graph`, `catalog`, `staging_projects`, `qa_reviews`, `publish_states`)
+  - [ ] F3.2 FastAPI upload endpoint: receive `.e57` + Matterpak + cubemaps, validate completeness + checksums
+  - [ ] F3.3 Immutable raw storage layout `/raw/{property_id}/{version}/` (S3-compatible; local FS for dev)
+  - [ ] F3.4 `scan_versions` registration with `is_authoritative` flag; status → `INGESTED`
+- [ ] **F4. Cubemap viewer (Babylon.js)**
+  - [ ] F4.1 WebGPUEngine async init, `powerPreference: high-performance`, WebGL2 fallback
+  - [ ] F4.2 Load active sweep cubemap as unlit skybox (Layer 1)
+  - [ ] F4.3 Sweep switching via `scan_positions` hotspot coordinates (simple jump; morphing comes in M7–9)
+- [ ] **F5. Automated pose-QA scoring (Gate 1)**
+  - [ ] F5.1 Headless Blender (bpy): render Matterpak OBJ wireframe from each sweep pose
+  - [ ] F5.2 Canny edge map of panorama vs projected mesh edges → edge-overlap score
+  - [ ] F5.3 Threshold: score < 0.85 → flag sweep to operator dashboard
+  - [ ] F5.4 Random 10% spot-check selection regardless of score
+- [ ] **F6. Operator dashboard (pose QA tool)**
+  - [ ] F6.1 React admin shell, property list + pipeline stage status
+  - [ ] F6.2 Side-by-side overlay view (pano vs wireframe)
+  - [ ] F6.3 Micro-adjust sliders (±1 mm / ±0.1°); corrected poses become ground truth → `poses.json`
+- [ ] **F7. Milestone validation**
+  - [ ] F7.1 Pixel-accurate overlay on the two-story-home scan
+  - [ ] F7.2 Pixel-accurate on the 50-scan test set, zero visible drift
+
+### Phase M4–6 · Geometry & Lighting
+
+> **Milestone:** proxy occludes a test object correctly; window reflects on a chrome sphere; sofa looks grounded.
+
+- [ ] **G1. Point cloud preprocessing** (Stage 3: PDAL tile-wise — never load 26 GB in memory; SOR filter 30 neighbors σ=2.0; voxel downsample 15 mm; normals 5 cm radius; archive full-res untouched; compressed PLY)
+- [ ] **G2. Plane fitting & boundary extraction** (Stage 5: sequential RANSAC floor/ceiling/walls, alpha-shape hulls, Douglas-Peucker 1 mm, opening detection, Clipper subtraction, sealed watertight corners < 1 mm, `structural_planes` rows with real-scale UV frames 1 m = 1.0 UV)
+- [ ] **G3. Proxy mesh synthesis** (Stage 6: watertight shell < 5,000 tris/room, labeled sub-meshes, OBJ-clipped non-planar details merged, `proxy.glb` Draco: pos 14 / normal 10 / UV 11 bits)
+- [ ] **G4. G-buffer baking** (Stage 7: per-sweep pixel-aligned depth/world-pos/normal, 2048² KTX2 — validates alignment now, enables Year-2 re-texturing)
+- [ ] **G5. IBL pre-computation** (Stage 8: linearize sRGB; interim blind boost `C_hdr = C_lin × (1 + 12·max(0, Y−0.85)^1.5)` → replaced by segmentation-guided highlight reconstruction before ship; diffuse irradiance + 5-level GGX specular chain via cmft; KTX2 UASTC HDR; emit `lighting_seeds.json`)
+- [ ] **G6. Semantic segmentation pipeline + Gate 2 tooling** (Stage 4: Mask2Former ADE20K + SAM refinement + 2D-3D fusion; classes: floor, wall_NN, ceiling, window, door, furniture, other; click-fix mask editor; masks + 3D furniture boxes stored for Year-2 inpainting — zero schema rework)
+- [ ] **G7. First furniture piece** (occlusion via depth-only proxy, per-sweep IBL, contact shadow via shadow-catcher WGSL: `final = background × (0.35 + 0.65 × shadowVisibility)`)
+- [ ] **G8. Milestone validation** (occlusion correct; chrome-sphere window reflection; sofa grounded)
+
+### Phase M7–9 · Tour & Staging
+
+> **Milestone:** complete multi-room tour of a test property with a staged room, 60 FPS.
+
+- [ ] **T1. Navigation graph** (Stage 9: nodes = sweeps; edges = unoccluded line-of-sight through proxy ≤ ~10 m; door-opening edges flagged as portals; `navigation_graph.json`)
+- [ ] **T2. Projective morphing transitions** (project current pano onto Matterpak OBJ via ShaderMaterial texture projector; cubic Bézier A→B ~800 ms; adaptive stretching + velocity blur if destination KTX2 not ready; final 150 ms cross-fade; neighbor prefetch; VRAM discipline — only active sweep resident)
+- [ ] **T3. Dollhouse view** (textured Matterpak OBJ, orbit camera, clickable sweep markers)
+- [ ] **T4. Minimap** (Matterpak floorplan + position indicator + hotspots)
+- [ ] **T5. Measurement tools** (point-to-point + area, computed against LiDAR-accurate planes/poses)
+- [ ] **T6. Drag-drop staging editor** (raycast to floor sub-meshes, Y locked to floor; Havok WASM colliders vs proxy walls; wall-bound assets snap to wall normal)
+- [ ] **T7. Staging project save/load** (JSON diff to `staging_projects`; shareable view-only links resolve `active_sweep_uuid` + payload)
+- [ ] **T8. Milestone validation** (full tour + staged room at 60 FPS)
+
+### Phase M10–12 · Platform & Scale
+
+> **Milestone:** upload scan → auto-process → publish → stage → share, end-to-end under 15 minutes.
+
+- [ ] **P1. Catalog admin + normalization pipeline** (headless Blender + gltf-transform: validate → meters → bottom-center pivot → decimate 40k/15k tris → Draco → KTX2 → AABB + thumbnail + LODs → S3 + catalog row; 100+ curated assets, all served from own CDN)
+- [ ] **P2. Multi-tenancy, auth, share links** (JWT, org → user → role)
+- [ ] **P3. DAG dashboard + autoscaling GPU workers** (Celery + Redis DAG state; Kubernetes, NVIDIA L4/A10G)
+- [ ] **P4. Compression & publish stage** (Stage 10: KTX2/Basis UASTC everywhere, Draco meshes, S3 + CloudFront, multi-res progressive cubemaps; status → `PUBLISHED`)
+- [ ] **P5. Monitoring** (Prometheus + Grafana, Loki logs)
+- [ ] **P6. CDN + load testing, cross-device QA, docs**
+- [ ] **P7. Milestone validation** (end-to-end < 15 min)
+
+---
+
+## 3. Offline Pipeline Stage Reference (per-property DAG)
+
+Every stage: **idempotent, input-hash versioned, per-stage cached, resumable, re-runnable independently.**
+Celery tasks on autoscaling GPU pods, status dashboard per property.
+
+| Stage | Name | Key tech | Phase |
+|-------|------|----------|-------|
+| 1 | Ingest & Validate | pye57, PDAL, boto3, FastAPI | M1–3 (F3) |
+| 2 | Pose Extraction & QA (Gate 1) | pye57, NumPy, OpenCV, trimesh, bpy | M1–3 (F2/F5/F6) |
+| 3 | Point Cloud Preprocessing | PDAL tile-wise, Open3D | M4–6 (G1) |
+| 4 | Semantic Segmentation (Gate 2) | PyTorch, Mask2Former, SAM | M4–6 (G6) |
+| 5 | Plane Fitting & Boundaries | Open3D, Shapely, Clipper, CGAL | M4–6 (G2) |
+| 6 | Proxy Mesh Synthesis | headless Blender, trimesh, Draco | M4–6 (G3) |
+| 7 | G-Buffer Baking | headless Blender offscreen | M4–6 (G4) |
+| 8 | IBL Pre-computation | OpenCV, OpenImageIO, cmft, toktx | M4–6 (G5) |
+| 9 | Navigation Graph | trimesh ray casting, NetworkX | M7–9 (T1) |
+| 10 | Compress & Publish | KTX2, Draco, S3 + CloudFront | M10–12 (P4) |
+
+---
+
+## 4. Data Model Reference (PostgreSQL 16 + JSONB)
+
+- `organizations`, `users` — JWT auth, org → user → role
+- `properties`
+- `scan_versions` — immutable, `is_authoritative` flag, raw asset URLs + checksums
+- `scan_positions` — sweep UUID, 4×4 pose as `REAL[16]`, pano/IBL/G-buffer KTX2 URLs, hotspot coordinates
+- `structural_planes` — semantic class, plane coefficients `REAL[4]`, boundary polygon GeoJSON, `openings_json`
+- `navigation_graph` — nodes/edges/portal flags
+- `catalog` — SKU, manufacturer, product name, category, price, currency, purchase URL, materials JSONB, dimensions_mm JSONB, weight, GLB/thumbnail S3 URLs, bounding box, polygon count, LOD URLs
+- `staging_projects` — property FK, name, `placement_payload` JSONB of `{sku, position [x,y,z], rotation quaternion}`, `is_published`, `active_sweep_uuid`
+- `qa_reviews`, `publish_states`
+
+Editing = lightweight JSON diff on `staging_projects`; heavy assets static and shared.
+Raw exports immutable in `/raw/{property_id}/{version}/`.
+
+---
+
+## 5. Acceptance Criteria (enterprise-grade, measurable)
+
+- [ ] Pose alignment: pixel-accurate on 50-scan test set, zero visible drift
+- [ ] Geometry: plane corner tolerance < 1 mm; proxy < 5k tris/room, watertight
+- [ ] Runtime: locked 60 FPS desktop + mobile web; < 3 s initial load
+- [ ] Pipeline: < 15 min end-to-end per property; every stage independently re-runnable
+- [ ] Visual QA: staged furniture passes side-by-side review; automated SSIM screenshot regression on reference scenes
+
+---
+
+## 6. Year 2 Modules (pre-wired now, zero rework later)
+
+- **Material re-texturing (floors first):** projective WGSL shader — ray from pose to fitted plane → real-scale UV → sample PBR material → multiply by intrinsic shading from photo. Consumes existing planes, masks, G-buffers.
+- **Room emptying:** stored 3D furniture boxes → SAM prompts → pixel-perfect masks → depth-guided diffusion inpainting (LaMa / SD + ControlNet), inpaint on plane textures, reproject for cross-sweep consistency, human QA.
+- **BIM export:** `structural_planes` + openings → IfcOpenShell → IFC4 DTV (IfcWallStandardCase with measured thickness, IfcSlab, IfcOpeningElement + IfcWindow/IfcDoor). Industrial scaling on archived full-res E57 (IfcPipeSegment, IfcColumn, IfcBeam).
+- **Free-roam:** LiDAR-seeded 3D Gaussian Splatting with geometric regularization, coordinate-locked.
+- **HDR capture upgrade, cinematic video export (headless Chrome + FFmpeg), mobile/VR.**
+
+---
+
+## 7. Top Risks & Guardrails
+
+1. **Pose registration drift** → automated scoring on every sweep, Gate 1, obsessive Phase-1 verification. *Everything downstream depends on it.*
+2. **IBL believability from LDR** → segmentation-guided reconstruction, chrome-sphere visual test in M4–6 milestone.
+3. **Proxy occlusion errors on non-planar geometry** → OBJ-detail merge (Decision 6) + visual QA checklist (clipping, occlusion correctness) before publish.
+
+---
+
+## Changelog
+
+| Date | Change |
+|------|--------|
+| 2026-07-10 | Plan committed. Phase M1–3 Foundation started. Next step: **F1 project scaffolding**, then **F2 E57 parser + pose extractor**. |
