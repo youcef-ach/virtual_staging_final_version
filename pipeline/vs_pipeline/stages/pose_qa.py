@@ -297,6 +297,7 @@ def score_property(
     output_dir: Path,
     threshold: float = DEFAULT_THRESHOLD,
     calibration_samples: int = 5,
+    calibration_path: Path | None = None,
 ) -> list[SweepQAResult]:
     """Score every rendered sweep; write pose_qa.json + review composites."""
     sweeps = read_poses_json(poses_path)
@@ -304,11 +305,28 @@ def score_property(
     if not rendered:
         raise ValueError(f"no rendered sweeps found under {render_dir}")
 
-    print(
-        f"auto-calibrating face mapping on {min(calibration_samples, len(rendered))} "
-        "sample sweep(s):"
-    )
-    calibration = calibrate_face_mapping(pano_dir, render_dir, rendered, calibration_samples)
+    if calibration_path is not None and calibration_path.exists():
+        calibration = json.loads(calibration_path.read_text(encoding="utf-8"))
+        print(f"loaded locked calibration from {calibration_path}")
+        for ext_face in FACE_NAMES:
+            entry = calibration.get(ext_face)
+            if entry:
+                print(
+                    f"  {ext_face} <- render {entry['render_face']} ({entry['op']}), "
+                    f"mean {entry.get('mean')}"
+                )
+    else:
+        print(
+            f"auto-calibrating face mapping on {min(calibration_samples, len(rendered))} "
+            "sample sweep(s):"
+        )
+        calibration = calibrate_face_mapping(pano_dir, render_dir, rendered, calibration_samples)
+        if calibration_path is not None:
+            calibration_path.parent.mkdir(parents=True, exist_ok=True)
+            calibration_path.write_text(
+                json.dumps(calibration, indent=2) + "\n", encoding="utf-8"
+            )
+            print(f"calibration locked -> {calibration_path}")
 
     results: list[SweepQAResult] = []
     composites_dir = output_dir / "composites"
@@ -393,6 +411,13 @@ def main(argv: list[str] | None = None) -> int:
     p_score.add_argument("--output", "-o", type=Path, default=Path("qa_output"))
     p_score.add_argument("--threshold", type=float, default=DEFAULT_THRESHOLD)
     p_score.add_argument("--calibration-samples", type=int, default=5)
+    p_score.add_argument(
+        "--calibration",
+        type=Path,
+        default=None,
+        help="calibration file (default: {output}/calibration.json); loaded if present, "
+        "otherwise computed and persisted",
+    )
 
     args = parser.parse_args(argv)
 
@@ -408,6 +433,7 @@ def main(argv: list[str] | None = None) -> int:
         args.output,
         threshold=args.threshold,
         calibration_samples=args.calibration_samples,
+        calibration_path=args.calibration or (args.output / "calibration.json"),
     )
     scored = [r for r in results if r.score is not None]
     flagged = [r for r in results if r.flagged]
@@ -417,9 +443,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\n{len(results)} sweep(s) scored, mean edge-overlap {mean:.3f}")
     print(f"flagged (< {args.threshold}): {len(flagged)}   spot-check: {len(spot)}")
     for r in sorted(flagged, key=lambda r: (r.score is not None, r.score)):
+        worst = sorted(r.face_scores.items(), key=lambda kv: kv[1])[:2]
+        detail = ", ".join(f"{face}={value:.2f}" for face, value in worst)
         print(
             f"  FLAG [{r.index:03d}] {r.sweep_uuid}  "
             f"score = {r.score if r.score is not None else 'n/a'}"
+            + (f"  (worst: {detail})" if detail else "")
         )
     print(f"report: {args.output / 'pose_qa.json'}   composites: {args.output / 'composites'}")
     return 0
