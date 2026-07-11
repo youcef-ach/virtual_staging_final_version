@@ -71,11 +71,11 @@ def _to_out(scan: models.ScanVersion) -> ScanVersionOut:
 def create_scan_version(
     property_id: uuid.UUID,
     e57_files: list[UploadFile] = File(..., description="One or more .e57 files"),
-    matterpak_files: list[UploadFile] | None = File(
-        default=None, description="Matterpak: OBJ/MTL/textures, cloud.xyz, floorplans (or .zip)"
+    matterpak_files: list[UploadFile] = File(
+        default=[], description="Matterpak: OBJ/MTL/textures, cloud.xyz, floorplans (or .zip)"
     ),
-    cubemap_files: list[UploadFile] | None = File(
-        default=None, description="4K cubemap faces (or .zip)"
+    cubemap_files: list[UploadFile] = File(
+        default=[], description="4K cubemap faces (or .zip)"
     ),
     db: Session = Depends(get_db),
 ) -> ScanVersionOut:
@@ -84,8 +84,8 @@ def create_scan_version(
 
     categories: dict[str, list[UploadFile]] = {
         "e57": e57_files,
-        "matterpak": matterpak_files or [],
-        "cubemaps": cubemap_files or [],
+        "matterpak": matterpak_files,
+        "cubemaps": cubemap_files,
     }
     _validate_suffixes(categories["e57"], "e57_files")
     _validate_suffixes(categories["matterpak"], "matterpak_files")
