@@ -11,7 +11,12 @@ Pipeline:
    overlap is normalized by the pano edge-mask density ((raw - density) /
    (1 - density)), so texture-dense and texture-sparse faces are comparable
    and the score responds to pose error rather than content. Sweep score =
-   mean over informative faces; score < threshold -> flagged for review.
+   mean over informative faces. Flagging is two-signal: sweep score below
+   the gross-failure floor (misregistration renders wrong geometry -> score
+   collapses toward chance ~0), OR mean orientation margin below
+   MARGIN_THRESHOLD (per face, the locked orientation's normalized overlap
+   must beat the best wrong orientation's -- a correct pose makes the locked
+   orientation stand out, drift collapses that gap, and content cancels out).
    A deterministic ~10% of sweeps is always marked for spot-check.
 
 Face-mapping auto-calibration: extracted faces carry the canonical Set A
@@ -41,8 +46,10 @@ import numpy as np
 from vs_pipeline.coordinates import convert_pose_yup_to_zup
 from vs_pipeline.stages.pose import SweepPose, read_poses_json
 
-QA_SCHEMA_VERSION = 3
-DEFAULT_THRESHOLD = 0.85
+QA_SCHEMA_VERSION = 4
+#: Gross-failure floor for the chance-corrected sweep score: a misregistered
+#: sweep renders wrong geometry, so its normalized score collapses toward 0.
+DEFAULT_THRESHOLD = 0.20
 SPOT_CHECK_RATE = 0.1
 DEFAULT_RENDER_SIZE = 512
 DILATE_PX = 5
@@ -54,6 +61,10 @@ MIN_INFORMATIVE_FACES = 2
 #: Pano faces whose dilated edge mask covers more than this fraction of the
 #: image are saturated (chance overlap ~= 1): no measurable alignment signal.
 PANO_MAX_DENSITY = 0.97
+#: Subtle-drift signal: mean per-face margin (locked orientation's normalized
+#: overlap minus the best wrong orientation's) below this value flags the
+#: sweep. Correct pose -> clear positive margin; drift -> margin collapses.
+MARGIN_THRESHOLD = 0.03
 
 FACE_NAMES = ("px", "nx", "py", "ny", "pz", "nz")
 
@@ -98,6 +109,9 @@ class SweepQAResult:
     score: float | None
     face_scores: dict[str, float]
     raw_face_scores: dict[str, float]
+    margin: float | None
+    face_margins: dict[str, float]
+    flag_reasons: list[str]
     flagged: bool
     spot_check: bool
     uninformative_faces: list[str]
@@ -417,6 +431,7 @@ def score_property(
     for sweep in rendered:
         face_scores: dict[str, float] = {}
         raw_face_scores: dict[str, float] = {}
+        face_margins: dict[str, float] = {}
         uninformative: list[str] = []
         faces_gray: dict[str, tuple[np.ndarray, np.ndarray, str]] = {}
         for ext_face in FACE_NAMES:
@@ -437,8 +452,15 @@ def score_property(
             if _mask_density(pano_dilated) > PANO_MAX_DENSITY:
                 uninformative.append(ext_face)  # saturated pano: no measurable signal
                 continue
-            face_scores[ext_face] = _normalized_overlap(pano_dilated, render_edges)
+            locked_norm = _normalized_overlap(pano_dilated, render_edges)
+            face_scores[ext_face] = locked_norm
             raw_face_scores[ext_face] = _overlap(pano_dilated, render_edges)
+            best_other = max(
+                _normalized_overlap(pano_dilated, _render_edges(render, other_op))
+                for other_op in ORIENTATION_OPS
+                if other_op != op
+            )
+            face_margins[ext_face] = locked_norm - best_other
             faces_gray[ext_face] = (pano, render, op)
         informative = len(face_scores)
         score = (
@@ -446,7 +468,20 @@ def score_property(
             if informative >= MIN_INFORMATIVE_FACES
             else None
         )
-        flagged = score is None or score < threshold
+        margin = (
+            float(np.mean(list(face_margins.values())))
+            if informative >= MIN_INFORMATIVE_FACES
+            else None
+        )
+        flag_reasons: list[str] = []
+        if score is None:
+            flag_reasons.append("too_few_informative_faces")
+        else:
+            if score < threshold:
+                flag_reasons.append("low_score")
+            if margin is not None and margin < MARGIN_THRESHOLD:
+                flag_reasons.append("low_margin")
+        flagged = bool(flag_reasons)
         spot = is_spot_check(sweep.sweep_uuid)
         results.append(
             SweepQAResult(
@@ -455,6 +490,9 @@ def score_property(
                 score=score,
                 face_scores=face_scores,
                 raw_face_scores=raw_face_scores,
+                margin=margin,
+                face_margins=face_margins,
+                flag_reasons=flag_reasons,
                 flagged=flagged,
                 spot_check=spot,
                 uninformative_faces=uninformative,
@@ -473,6 +511,7 @@ def score_property(
     payload = {
         "schema_version": QA_SCHEMA_VERSION,
         "threshold": threshold,
+        "margin_threshold": MARGIN_THRESHOLD,
         "spot_check_rate": SPOT_CHECK_RATE,
         "calibration": calibration,
         "sweep_count": len(results),
@@ -485,6 +524,9 @@ def score_property(
                 "score": r.score,
                 "face_scores": r.face_scores,
                 "raw_face_scores": r.raw_face_scores,
+                "margin": r.margin,
+                "face_margins": r.face_margins,
+                "flag_reasons": r.flag_reasons,
                 "uninformative_faces": r.uninformative_faces,
                 "flagged": r.flagged,
                 "spot_check": r.spot_check,
@@ -654,16 +696,25 @@ def main(argv: list[str] | None = None) -> int:
     if scored:
         mean = float(np.mean([r.score for r in scored if r.score is not None]))
         print(f"\n{len(results)} sweep(s) scored, mean edge-overlap {mean:.3f}")
-    print(f"flagged (< {args.threshold}): {len(flagged)}   spot-check: {len(spot)}")
+        margins = [r.margin for r in scored if r.margin is not None]
+        if margins:
+            print(f"mean orientation margin {float(np.mean(margins)):.3f}")
+    print(
+        f"flagged (score < {args.threshold} or margin < {MARGIN_THRESHOLD}): "
+        f"{len(flagged)}   spot-check: {len(spot)}"
+    )
     for r in sorted(flagged, key=lambda r: (r.score is not None, r.score)):
         worst = sorted(r.face_scores.items(), key=lambda kv: kv[1])[:2]
         detail = ", ".join(f"{face}={value:.2f}" for face, value in worst)
         extra = f"  (worst: {detail})" if detail else ""
         if r.uninformative_faces:
             extra += f"  [no-signal: {','.join(r.uninformative_faces)}]"
+        score_str = f"{r.score:.3f}" if r.score is not None else "n/a"
+        margin_str = f"{r.margin:.3f}" if r.margin is not None else "n/a"
         print(
             f"  FLAG [{r.index:03d}] {r.sweep_uuid}  "
-            f"score = {r.score if r.score is not None else 'n/a'}"
+            f"score = {score_str}  margin = {margin_str}  "
+            f"[{','.join(r.flag_reasons)}]"
             + extra
         )
     print(f"report: {args.output / 'pose_qa.json'}   composites: {args.output / 'composites'}")
