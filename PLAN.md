@@ -75,7 +75,7 @@ lightweight streaming web viewer.
   - [ ] F4.1 WebGPUEngine async init, `powerPreference: high-performance`, WebGL2 fallback
   - [ ] F4.2 Load active sweep cubemap as unlit skybox (Layer 1)
   - [ ] F4.3 Sweep switching via `scan_positions` hotspot coordinates (simple jump; morphing comes in M7–9)
-  - [ ] F4.4 Face-orientation calibration: lock `FACE_TRANSFORMS` (seams visually correct in the viewer)
+  - [ ] F4.4 Face-orientation calibration: verify canonical Set A transforms (pre-seeded from the proven pipeline) against Babylon.js; apply any global adjustment at runtime only (seams visually correct in the viewer)
 - [ ] **F5. Automated pose-QA scoring (Gate 1)**
   - [ ] F5.1 Headless Blender (bpy): render Matterpak OBJ wireframe from each sweep pose
   - [ ] F5.2 Canny edge map of panorama vs projected mesh edges → edge-overlap score

@@ -2,13 +2,11 @@ import json
 from pathlib import Path
 
 import numpy as np
-import pytest
 
 from vs_pipeline.stages.panorama import (
     FACE_NAMES,
     PANORAMA_SCHEMA_VERSION,
     SweepFaces,
-    apply_face_transform,
     dominant_axis,
     quat_conjugate,
     quat_rotate,
@@ -45,18 +43,6 @@ def test_dominant_axis() -> None:
     assert dominant_axis([0.1, 0.2, 0.9]) == "+Z"
 
 
-def test_apply_face_transform_ops() -> None:
-    image = np.arange(24, dtype=np.uint8).reshape(2, 4, 3)
-    assert apply_face_transform(image, "none") is image
-    assert apply_face_transform(image, "rot90_cw").shape == (4, 2, 3)
-    assert apply_face_transform(image, "rot90_ccw").shape == (4, 2, 3)
-    np.testing.assert_array_equal(apply_face_transform(image, "rot180"), image[::-1, ::-1])
-    np.testing.assert_array_equal(apply_face_transform(image, "flip_h"), image[:, ::-1])
-    np.testing.assert_array_equal(apply_face_transform(image, "flip_v"), image[::-1])
-    with pytest.raises(ValueError):
-        apply_face_transform(image, "transpose")
-
-
 def test_manifest_reports_incomplete_sweeps(tmp_path: Path) -> None:
     complete = SweepFaces(
         sweep_uuid="aaaa-0001",
@@ -73,5 +59,8 @@ def test_manifest_reports_incomplete_sweeps(tmp_path: Path) -> None:
     assert payload["schema_version"] == PANORAMA_SCHEMA_VERSION
     assert payload["sweep_count"] == 2
     assert payload["incomplete_sweeps"] == ["aaaa-0002"]
-    assert set(payload["face_transforms"]) == set(FACE_NAMES)
+    transforms = payload["canonical_transforms"]
+    assert transforms["order"] == ["set_a_rotation_cw", "z_inversion_flips_and_swap"]
+    assert transforms["rotations_cw"]["+X"] == 90
+    assert transforms["output_axis_remap"]["+Z"] == "-Z"
     assert payload["sweeps"][0]["faces"]["pz"] == "aaaa-0001/pz.jpg"

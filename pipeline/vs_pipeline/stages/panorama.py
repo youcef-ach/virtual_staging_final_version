@@ -5,14 +5,15 @@ Matterport E57 exports embed six cube-face images per sweep. This stage:
 1. reads each image2D entry via pye57's low-level libe57 API,
 2. classifies which cube face it is (dominant scanner-local view axis, derived
    from the image pose quaternion and the inverse sweep rotation),
-3. associates it with the sweep GUID (same normalization as the pose stage,
+3. applies the canonical Set A transforms (see vs_pipeline/cubemap_transforms.py:
+   rotation -> flip -> +Z/-Z swap; proven in the previous production pipeline),
+4. associates faces with the sweep GUID (same normalization as the pose stage,
    so keys match ``poses.json`` exactly),
-4. writes faces to ``{out}/{sweep_uuid}/{face}.jpg`` + ``manifest.json``.
+5. writes faces to ``{out}/{sweep_uuid}/{face}.jpg`` + ``manifest.json``.
 
-Face pixel orientation is centralized in ``FACE_TRANSFORMS`` (identity by
-default) and locked during F4 visual calibration against the Babylon.js
-viewer. No viewer-specific pose corrections are baked into the output —
-poses.json remains the single source of pose truth.
+No viewer-specific pose corrections are baked into the output — poses.json
+remains the single source of pose truth. Any residual global orientation
+adjustment for Babylon.js is resolved at runtime during F4.4 calibration.
 
 CLI:
     python -m vs_pipeline.stages.panorama input.e57 -o extracted_cubemaps/
@@ -29,6 +30,12 @@ from typing import Any
 import cv2
 import numpy as np
 
+from vs_pipeline.cubemap_transforms import (
+    FACE_FLIPS,
+    FACE_OUTPUT_AXIS,
+    FACE_ROTATIONS_CW,
+    transform_face,
+)
 from vs_pipeline.stages.pose import _read_scan_guid, fallback_sweep_uuid, sha256_file
 
 PANORAMA_SCHEMA_VERSION = 1
@@ -36,11 +43,6 @@ PANORAMA_SCHEMA_VERSION = 1
 FACE_NAMES = ("px", "nx", "py", "ny", "pz", "nz")
 
 _AXIS_TO_FACE = {"+X": "px", "-X": "nx", "+Y": "py", "-Y": "ny", "+Z": "pz", "-Z": "nz"}
-
-#: Single calibration point for face pixel orientation, locked during F4
-#: visual validation (seam continuity in the runtime viewer).
-#: Allowed ops: none | rot90_cw | rot90_ccw | rot180 | flip_h | flip_v
-FACE_TRANSFORMS: dict[str, str] = {name: "none" for name in FACE_NAMES}
 
 _REPRESENTATIONS = (
     "sphericalRepresentation",
@@ -85,22 +87,6 @@ def dominant_axis(vec: Any) -> str:
     return f"{sign}{'XYZ'[idx]}"
 
 
-def apply_face_transform(image: np.ndarray, op: str) -> np.ndarray:
-    if op == "none":
-        return image
-    if op == "rot90_cw":
-        return cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
-    if op == "rot90_ccw":
-        return cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE)
-    if op == "rot180":
-        return cv2.rotate(image, cv2.ROTATE_180)
-    if op == "flip_h":
-        return cv2.flip(image, 1)
-    if op == "flip_v":
-        return cv2.flip(image, 0)
-    raise ValueError(f"unknown face transform: {op}")
-
-
 def _read_image_quaternion(img_node: Any) -> np.ndarray | None:
     """Image pose rotation as (x, y, z, w), or None if absent."""
     try:
@@ -143,7 +129,7 @@ def _read_assoc_guid(img_node: Any) -> str | None:
 
 
 def extract_cubemaps(e57_path: Path, output_dir: Path) -> list[SweepFaces]:
-    """Extract all embedded cube faces, grouped per sweep UUID."""
+    """Extract all embedded cube faces, canonically transformed, per sweep UUID."""
     import pye57  # local import: keeps module importable without libE57 present
 
     e57 = pye57.E57(str(e57_path))
@@ -182,39 +168,40 @@ def extract_cubemaps(e57_path: Path, output_dir: Path) -> list[SweepFaces]:
             quat = _read_image_quaternion(img_node)
             if quat is None:
                 continue
-            # Global view direction -> scanner-local -> dominant axis = face.
+            # Global view direction -> scanner-local -> dominant axis = source face.
             local_fwd = quat_rotate(inv_rotations[scan_idx], quat_rotate(quat, [0.0, 0.0, 1.0]))
-            face = _AXIS_TO_FACE[dominant_axis(local_fwd)]
+            source_axis = dominant_axis(local_fwd)
 
             blob = _read_blob(img_node)
             if blob is None:
                 continue
-            raw_bytes, ext = blob
+            raw_bytes, _ext = blob
+
+            decoded = cv2.imdecode(np.frombuffer(raw_bytes, np.uint8), cv2.IMREAD_COLOR)
+            if decoded is None:
+                raise RuntimeError(
+                    f"failed to decode face {source_axis} of sweep {sweeps[scan_idx].sweep_uuid}"
+                )
+
+            # Canonical Set A transform (rotation -> flip -> Z swap).
+            transformed, output_axis = transform_face(decoded, source_axis)
+            face = _AXIS_TO_FACE[output_axis]
 
             sweep = sweeps[scan_idx]
             face_dir = output_dir / sweep.sweep_uuid
             face_dir.mkdir(parents=True, exist_ok=True)
             out_path = face_dir / f"{face}.jpg"
 
-            op = FACE_TRANSFORMS[face]
-            if op == "none" and ext == ".jpg":
-                # Lossless pass-through: no decode / re-encode generation loss.
-                out_path.write_bytes(raw_bytes)
-            else:
-                decoded = cv2.imdecode(np.frombuffer(raw_bytes, np.uint8), cv2.IMREAD_COLOR)
-                if decoded is None:
-                    raise RuntimeError(
-                        f"failed to decode face {face} of sweep {sweep.sweep_uuid}"
-                    )
-                transformed = apply_face_transform(decoded, op)
-                ok, encoded = cv2.imencode(
-                    ".jpg", transformed, [int(cv2.IMWRITE_JPEG_QUALITY), _JPEG_QUALITY]
+            ok, encoded = cv2.imencode(
+                ".jpg",
+                np.ascontiguousarray(transformed),  # rot90/flip return strided views
+                [int(cv2.IMWRITE_JPEG_QUALITY), _JPEG_QUALITY],
+            )
+            if not ok:
+                raise RuntimeError(
+                    f"failed to encode face {face} of sweep {sweep.sweep_uuid}"
                 )
-                if not ok:
-                    raise RuntimeError(
-                        f"failed to encode face {face} of sweep {sweep.sweep_uuid}"
-                    )
-                out_path.write_bytes(encoded.tobytes())
+            out_path.write_bytes(encoded.tobytes())
             sweep.faces[face] = f"{sweep.sweep_uuid}/{face}.jpg"
         return sweeps
     finally:
@@ -233,7 +220,12 @@ def write_manifest(
         "schema_version": PANORAMA_SCHEMA_VERSION,
         "source_file": source_file,
         "source_sha256": source_sha256,
-        "face_transforms": dict(FACE_TRANSFORMS),
+        "canonical_transforms": {
+            "order": ["set_a_rotation_cw", "z_inversion_flips_and_swap"],
+            "rotations_cw": dict(FACE_ROTATIONS_CW),
+            "flips": dict(FACE_FLIPS),
+            "output_axis_remap": dict(FACE_OUTPUT_AXIS),
+        },
         "sweep_count": len(sweeps),
         "incomplete_sweeps": incomplete,
         "sweeps": [
