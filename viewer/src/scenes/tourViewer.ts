@@ -81,6 +81,9 @@ export class TourViewer {
     this.camera.fov = 1.15;
     this.camera.inputs.clear(); // deterministic pano controls below
     this.attachPanoControls(engine.getRenderingCanvas());
+    // Single orientation code path from frame one (avoids the RH TargetCamera
+    // 180-degree discrepancy between setTarget and direct rotation writes).
+    this.applyLook();
 
     const skybox = CreateBox("skybox", { size: 512 }, this.scene);
     skybox.infiniteDistance = true; // always centered on the camera
@@ -132,6 +135,7 @@ export class TourViewer {
     previous?.dispose(); // VRAM discipline
 
     this.camera.position.set(sweep.position[0], sweep.position[1], sweep.position[2]);
+    this.applyLook();
     this.activeUuid = uuid;
     this.onSweepShown?.(uuid);
   }
@@ -151,6 +155,17 @@ export class TourViewer {
     this.detachControls = null;
     this.activeTexture?.dispose();
     this.scene.dispose();
+  }
+
+  /** The one and only place camera orientation is applied (all frames, all paths). */
+  private applyLook(): void {
+    const cosPitch = Math.cos(this.pitch);
+    const direction = new Vector3(
+      Math.sin(this.yaw) * cosPitch,
+      Math.sin(this.pitch),
+      Math.cos(this.yaw) * cosPitch,
+    );
+    this.camera.setTarget(this.camera.position.add(direction));
   }
 
   private currentOrientationMatrix(): Matrix {
@@ -187,7 +202,7 @@ export class TourViewer {
         -PITCH_LIMIT,
         Math.min(PITCH_LIMIT, this.pitch - dy * DRAG_SENSITIVITY),
       );
-      this.camera.rotation.set(this.pitch, this.yaw, 0);
+      this.applyLook();
     };
     const onPointerUp = (event: PointerEvent) => {
       dragging = false;
