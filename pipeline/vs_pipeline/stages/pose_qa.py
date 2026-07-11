@@ -7,8 +7,11 @@ Pipeline:
    (camera-to-world matrices for Blender: X=right, Y=up, -Z=view).
 2. Blender renders normalized depth per face (pipeline/blender/render_edges.py).
 3. ``score``: Canny edges of the rendered depth vs dilated Canny edges of the
-   extracted panorama face -> edge-overlap score in [0, 1] per face; sweep
-   score = mean over faces. score < 0.85 -> flagged for operator review.
+   extracted panorama face -> chance-corrected edge-overlap per face: the raw
+   overlap is normalized by the pano edge-mask density ((raw - density) /
+   (1 - density)), so texture-dense and texture-sparse faces are comparable
+   and the score responds to pose error rather than content. Sweep score =
+   mean over informative faces; score < threshold -> flagged for review.
    A deterministic ~10% of sweeps is always marked for spot-check.
 
 Face-mapping auto-calibration: extracted faces carry the canonical Set A
@@ -38,7 +41,7 @@ import numpy as np
 from vs_pipeline.coordinates import convert_pose_yup_to_zup
 from vs_pipeline.stages.pose import SweepPose, read_poses_json
 
-QA_SCHEMA_VERSION = 2
+QA_SCHEMA_VERSION = 3
 DEFAULT_THRESHOLD = 0.85
 SPOT_CHECK_RATE = 0.1
 DEFAULT_RENDER_SIZE = 512
@@ -48,6 +51,9 @@ DILATE_PX = 5
 MIN_RENDER_EDGE_PIXELS = 200
 #: Minimum informative faces required to score a sweep at all.
 MIN_INFORMATIVE_FACES = 2
+#: Pano faces whose dilated edge mask covers more than this fraction of the
+#: image are saturated (chance overlap ~= 1): no measurable alignment signal.
+PANO_MAX_DENSITY = 0.97
 
 FACE_NAMES = ("px", "nx", "py", "ny", "pz", "nz")
 
@@ -91,6 +97,7 @@ class SweepQAResult:
     index: int
     score: float | None
     face_scores: dict[str, float]
+    raw_face_scores: dict[str, float]
     flagged: bool
     spot_check: bool
     uninformative_faces: list[str]
@@ -218,16 +225,37 @@ def _overlap(pano_dilated: np.ndarray, render_edges: np.ndarray) -> float:
     return hits / total
 
 
+def _mask_density(mask: np.ndarray) -> float:
+    return float(np.count_nonzero(mask)) / float(mask.size)
+
+
+def _normalized_overlap(pano_dilated: np.ndarray, render_edges: np.ndarray) -> float:
+    """Chance-corrected overlap: (raw - density) / (1 - density).
+
+    ``density`` is the fraction of the image covered by the dilated pano edge
+    mask -- the overlap a randomly placed edge set would achieve by chance.
+    The normalized score measures how much better than chance the alignment
+    is, making texture-dense and texture-sparse faces comparable. A perfect
+    alignment still scores 1.0; a chance-level alignment scores ~0.0; worse
+    than chance is negative.
+    """
+    density = _mask_density(pano_dilated)
+    if density >= 1.0:
+        return 0.0
+    raw = _overlap(pano_dilated, render_edges)
+    return (raw - density) / (1.0 - density)
+
+
 def edge_overlap_score(
     pano_gray: np.ndarray,
     render_gray: np.ndarray,
     orientation: str = "rot0",
     dilate_px: int = DILATE_PX,  # noqa: ARG001 (kept for API stability)
 ) -> float:
-    """Fraction of rendered geometry edges that land on (dilated) pano edges."""
+    """Chance-corrected fraction of rendered edges landing on (dilated) pano edges."""
     render_edges = _render_edges(render_gray, orientation)
     pano_dilated = _pano_edges_dilated(pano_gray, render_edges.shape)
-    return _overlap(pano_dilated, render_edges)
+    return _normalized_overlap(pano_dilated, render_edges)
 
 
 def _bijective_assignment(
@@ -294,7 +322,9 @@ def calibrate_face_mapping(
                         continue
                     if np.count_nonzero(render) < MIN_RENDER_EDGE_PIXELS:
                         continue  # no alignment signal in this render
-                    values.append(_overlap(pano, render))
+                    if _mask_density(pano) > PANO_MAX_DENSITY:
+                        continue  # saturated pano: chance overlap ~= 1
+                    values.append(_normalized_overlap(pano, render))
                 if values:
                     combo_scores[(ext_face, render_face, op)] = float(np.mean(values))
 
@@ -386,6 +416,7 @@ def score_property(
     composites_dir = output_dir / "composites"
     for sweep in rendered:
         face_scores: dict[str, float] = {}
+        raw_face_scores: dict[str, float] = {}
         uninformative: list[str] = []
         faces_gray: dict[str, tuple[np.ndarray, np.ndarray, str]] = {}
         for ext_face in FACE_NAMES:
@@ -403,7 +434,11 @@ def score_property(
                 uninformative.append(ext_face)  # no signal: exclude, don't punish
                 continue
             pano_dilated = _pano_edges_dilated(pano, render_edges.shape)
-            face_scores[ext_face] = _overlap(pano_dilated, render_edges)
+            if _mask_density(pano_dilated) > PANO_MAX_DENSITY:
+                uninformative.append(ext_face)  # saturated pano: no measurable signal
+                continue
+            face_scores[ext_face] = _normalized_overlap(pano_dilated, render_edges)
+            raw_face_scores[ext_face] = _overlap(pano_dilated, render_edges)
             faces_gray[ext_face] = (pano, render, op)
         informative = len(face_scores)
         score = (
@@ -419,6 +454,7 @@ def score_property(
                 index=sweep.index,
                 score=score,
                 face_scores=face_scores,
+                raw_face_scores=raw_face_scores,
                 flagged=flagged,
                 spot_check=spot,
                 uninformative_faces=uninformative,
@@ -448,6 +484,7 @@ def score_property(
                 "index": r.index,
                 "score": r.score,
                 "face_scores": r.face_scores,
+                "raw_face_scores": r.raw_face_scores,
                 "uninformative_faces": r.uninformative_faces,
                 "flagged": r.flagged,
                 "spot_check": r.spot_check,
