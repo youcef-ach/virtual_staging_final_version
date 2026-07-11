@@ -43,6 +43,11 @@ DEFAULT_THRESHOLD = 0.85
 SPOT_CHECK_RATE = 0.1
 DEFAULT_RENDER_SIZE = 512
 DILATE_PX = 5
+#: Rendered faces with fewer edge pixels than this carry no alignment signal
+#: (camera facing sky / outside the mesh / through a window) and are excluded.
+MIN_RENDER_EDGE_PIXELS = 200
+#: Minimum informative faces required to score a sweep at all.
+MIN_INFORMATIVE_FACES = 2
 
 FACE_NAMES = ("px", "nx", "py", "ny", "pz", "nz")
 
@@ -88,6 +93,7 @@ class SweepQAResult:
     face_scores: dict[str, float]
     flagged: bool
     spot_check: bool
+    uninformative_faces: list[str]
 
 
 def apply_orientation(image: np.ndarray, op: str) -> np.ndarray:
@@ -257,6 +263,8 @@ def calibrate_face_mapping(
                     render = render_edge_cache.get((render_face, sweep.sweep_uuid, op))
                     if pano is None or render is None:
                         continue
+                    if np.count_nonzero(render) < MIN_RENDER_EDGE_PIXELS:
+                        continue  # no alignment signal in this render
                     values.append(_overlap(pano, render))
                 if values:
                     combo_scores[(ext_face, render_face, op)] = float(np.mean(values))
@@ -274,18 +282,35 @@ def calibrate_face_mapping(
     return mapping
 
 
-def _write_composite(
-    pano_gray: np.ndarray, render_gray: np.ndarray, orientation: str, out_path: Path
+def _write_composite_grid(
+    faces: list[tuple[str, float, np.ndarray, np.ndarray, str]], out_path: Path
 ) -> None:
-    """Side-by-side review image: pano | pano with rendered edges in red."""
-    render_edges = _render_edges(render_gray, orientation)
-    pano_small = cv2.resize(
-        pano_gray, (render_edges.shape[1], render_edges.shape[0]), interpolation=cv2.INTER_AREA
-    )
-    color = cv2.cvtColor(pano_small, cv2.COLOR_GRAY2BGR)
-    overlay = color.copy()
-    overlay[render_edges > 0] = (0, 0, 255)
-    composite = np.hstack([color, overlay])
+    """Stacked review image: one row per face = pano | pano with red render edges."""
+    rows: list[np.ndarray] = []
+    for face_name, score, pano_gray, render_gray, orientation in faces:
+        render_edges = _render_edges(render_gray, orientation)
+        pano_small = cv2.resize(
+            pano_gray,
+            (render_edges.shape[1], render_edges.shape[0]),
+            interpolation=cv2.INTER_AREA,
+        )
+        color = cv2.cvtColor(pano_small, cv2.COLOR_GRAY2BGR)
+        overlay = color.copy()
+        overlay[render_edges > 0] = (0, 0, 255)
+        row = np.hstack([color, overlay])
+        cv2.putText(
+            row,
+            f"{face_name}  {score:.2f}",
+            (8, 28),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.8,
+            (0, 255, 0),
+            2,
+        )
+        rows.append(row)
+    if not rows:
+        return
+    composite = np.vstack(rows)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     cv2.imwrite(str(out_path), composite, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
 
@@ -332,6 +357,7 @@ def score_property(
     composites_dir = output_dir / "composites"
     for sweep in rendered:
         face_scores: dict[str, float] = {}
+        uninformative: list[str] = []
         faces_gray: dict[str, tuple[np.ndarray, np.ndarray, str]] = {}
         for ext_face in FACE_NAMES:
             entry = calibration.get(ext_face)
@@ -343,9 +369,19 @@ def score_property(
             render = _load_gray(render_dir / sweep.sweep_uuid / f"{render_face}.png")
             if pano is None or render is None:
                 continue
-            face_scores[ext_face] = edge_overlap_score(pano, render, op)
+            render_edges = _render_edges(render, op)
+            if int(np.count_nonzero(render_edges)) < MIN_RENDER_EDGE_PIXELS:
+                uninformative.append(ext_face)  # no signal: exclude, don't punish
+                continue
+            pano_dilated = _pano_edges_dilated(pano, render_edges.shape)
+            face_scores[ext_face] = _overlap(pano_dilated, render_edges)
             faces_gray[ext_face] = (pano, render, op)
-        score = float(np.mean(list(face_scores.values()))) if face_scores else None
+        informative = len(face_scores)
+        score = (
+            float(np.mean(list(face_scores.values())))
+            if informative >= MIN_INFORMATIVE_FACES
+            else None
+        )
         flagged = score is None or score < threshold
         spot = is_spot_check(sweep.sweep_uuid)
         results.append(
@@ -356,16 +392,17 @@ def score_property(
                 face_scores=face_scores,
                 flagged=flagged,
                 spot_check=spot,
+                uninformative_faces=uninformative,
             )
         )
         if (flagged or spot) and face_scores:
-            worst_face = min(face_scores, key=lambda f: face_scores[f])
-            pano, render, op = faces_gray[worst_face]
-            _write_composite(
-                pano,
-                render,
-                op,
-                composites_dir / f"{sweep.index:03d}_{sweep.sweep_uuid}_{worst_face}.jpg",
+            grid = [
+                (face, face_scores[face], *faces_gray[face])
+                for face in FACE_NAMES
+                if face in face_scores
+            ]
+            _write_composite_grid(
+                grid, composites_dir / f"{sweep.index:03d}_{sweep.sweep_uuid}.jpg"
             )
 
     payload = {
@@ -382,6 +419,7 @@ def score_property(
                 "index": r.index,
                 "score": r.score,
                 "face_scores": r.face_scores,
+                "uninformative_faces": r.uninformative_faces,
                 "flagged": r.flagged,
                 "spot_check": r.spot_check,
             }
@@ -445,10 +483,13 @@ def main(argv: list[str] | None = None) -> int:
     for r in sorted(flagged, key=lambda r: (r.score is not None, r.score)):
         worst = sorted(r.face_scores.items(), key=lambda kv: kv[1])[:2]
         detail = ", ".join(f"{face}={value:.2f}" for face, value in worst)
+        extra = f"  (worst: {detail})" if detail else ""
+        if r.uninformative_faces:
+            extra += f"  [no-signal: {','.join(r.uninformative_faces)}]"
         print(
             f"  FLAG [{r.index:03d}] {r.sweep_uuid}  "
             f"score = {r.score if r.score is not None else 'n/a'}"
-            + (f"  (worst: {detail})" if detail else "")
+            + extra
         )
     print(f"report: {args.output / 'pose_qa.json'}   composites: {args.output / 'composites'}")
     return 0
