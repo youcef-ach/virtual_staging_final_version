@@ -11,8 +11,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Requires system-level PDAL install; needed from Phase M4-6 (stage G1). See docs/DEVELOPMENT.md.
-pointcloud = ["pdal>=3.4"]
+# Stage G1 point-cloud preprocessing. Install: pip install -e .[pointcloud]
+# E57 sources are chunked per sweep via pye57 (native E57 tiling); PDAL only
+# becomes relevant for non-E57 inputs and can be added then.
+pointcloud = ["open3d>=0.18"]
 dev = [
   "pytest>=8.0",
   "ruff>=0.8",

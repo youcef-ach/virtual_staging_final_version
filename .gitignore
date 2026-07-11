@@ -50,4 +50,5 @@ pipeline/perturb_renders/
 pipeline/perturb_output/
 pipeline/calibration*.json*
 pipeline/diag_*.py
+pipeline/preprocessed/
 dashboard/public/qa/
