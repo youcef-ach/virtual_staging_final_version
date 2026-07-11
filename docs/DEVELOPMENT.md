@@ -31,6 +31,20 @@ npm run build      # production build
 The HUD (top-left) shows the active render backend — **WEBGPU** on supported browsers
 (Chrome/Edge ≥ 113, recent Firefox), **WEBGL2** otherwise. Verify both paths when possible.
 
+### Tour data
+
+The viewer reads pipeline outputs from `viewer/public/data/` (git-ignored):
+
+```powershell
+# from the repo root, after running the pose + panorama stages in pipeline/
+New-Item -ItemType Directory -Force viewer\public\data | Out-Null
+Copy-Item pipeline\extracted_cubemaps\* viewer\public\data\ -Recurse -Force
+Copy-Item pipeline\poses.json viewer\public\data\ -Force
+```
+
+Expected layout: `viewer/public/data/manifest.json`, `viewer/public/data/poses.json`,
+and one `{sweep_uuid}/` folder per sweep containing `px/nx/py/ny/pz/nz.jpg`.
+
 ## Backend (`backend/`)
 
 ```bash
