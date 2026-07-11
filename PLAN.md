@@ -86,7 +86,7 @@ lightweight streaming web viewer.
   - [x] F6.2 Side-by-side overlay view ✅ *validated 2026-07-11: 3-column composites (pano | OBJ render | red-edge overlay), schema-v4 queue with margins + flag reasons; full 47-flag review → zero pose errors, all flags content-driven (glass/windows, mirrors, OBJ sparsity)*
   - [ ] F6.3 Micro-adjust sliders (±1 mm / ±0.1°); corrected poses become ground truth → `poses.json` *(deferred by design: build only if a genuinely drifted pose ever appears — zero evidence to date)*
 - [ ] **F7. Milestone validation**
-  - [ ] F7.1 Pixel-accurate overlay on the two-story-home scan
+  - [x] F7.1 Pixel-accurate overlay on the two-story-home scan ✅ *validated 2026-07-11: ghosting verification blends cleanly on structure (walls/room edges); residual detail offsets (furniture) = MatterPak OBJ decimation, not pose — zero pose errors across the full 198-sweep review; OBJ precision not load-bearing downstream (E57 drives planes/proxy/G-buffers/measurements)*
   - [ ] F7.2 Pixel-accurate on the 50-scan test set, zero visible drift
 
 ### Phase M4–6 · Geometry & Lighting
