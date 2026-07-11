@@ -1,6 +1,6 @@
 import type { AbstractEngine } from "@babylonjs/core/Engines/abstractEngine";
 import { Scene } from "@babylonjs/core/scene";
-import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
+import { FreeCamera } from "@babylonjs/core/Cameras/freeCamera";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
 import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder";
@@ -12,21 +12,33 @@ import type { TourData } from "../data/types";
 /** Babylon CubeTexture file order: +x, +y, +z, -x, -y, -z. */
 const FACE_ORDER = ["px", "py", "pz", "nx", "ny", "nz"] as const;
 
+/** Drag sensitivity (radians per pixel) and pitch clamp for the pano camera. */
+const DRAG_SENSITIVITY = 0.0025;
+const PITCH_LIMIT = Math.PI / 2 - 0.02;
+
 /**
  * Layer 1 renderer: the photographic layer. The active sweep's cubemap is an
  * unlit skybox, rendered as-is, never modified (visual truth).
  *
+ * Camera: inside-out look-around (FreeCamera + deterministic drag handler),
+ * NOT an orbit camera — the viewer stands at the sweep position and rotates
+ * in place. Yaw/pitch persist across sweep jumps for continuity.
+ *
  * VRAM discipline: only the active sweep's cubemap stays resident; the
- * previous texture is disposed right after the swap.
+ * previous texture is disposed right after the swap. Each texture uses the
+ * sweep UUID as its cache key (Babylon caches by rootUrl).
  */
 export class TourViewer {
   readonly scene: Scene;
   onSweepShown?: (uuid: string) => void;
 
-  private readonly camera: ArcRotateCamera;
+  private readonly camera: FreeCamera;
   private readonly skyboxMaterial: StandardMaterial;
   private activeTexture: CubeTexture | null = null;
   private activeUuid: string | null = null;
+  private yaw = 0;
+  private pitch = 0;
+  private detachControls: (() => void) | null = null;
 
   constructor(
     engine: AbstractEngine,
@@ -37,21 +49,11 @@ export class TourViewer {
     this.scene.useRightHandedSystem = true;
     this.scene.clearColor = new Color4(0, 0, 0, 1);
 
-    this.camera = new ArcRotateCamera(
-      "camera",
-      -Math.PI / 2,
-      Math.PI / 2,
-      0.05,
-      Vector3.Zero(),
-      this.scene,
-    );
-    this.camera.attachControl(true);
-    this.camera.lowerRadiusLimit = 0.05;
-    this.camera.upperRadiusLimit = 0.05;
-    this.camera.panningSensibility = 0;
-    this.camera.inputs.removeByType("ArcRotateCameraMouseWheelInput");
+    this.camera = new FreeCamera("camera", Vector3.Zero(), this.scene);
     this.camera.minZ = 0.01;
     this.camera.fov = 1.15;
+    this.camera.inputs.clear(); // deterministic pano controls below
+    this.attachPanoControls(engine.getRenderingCanvas());
 
     const skybox = CreateBox("skybox", { size: 512 }, this.scene);
     skybox.infiniteDistance = true; // always centered on the camera
@@ -75,7 +77,8 @@ export class TourViewer {
       throw new Error(`unknown sweep: ${uuid}`);
     }
     const files = FACE_ORDER.map((face) => `${this.tour.baseUrl}/${sweep.faces[face]}`);
-    const texture = await this.loadCubeTexture(files);
+    // Unique cache key per sweep: Babylon caches cube textures by rootUrl.
+    const texture = await this.loadCubeTexture(`sweep:${sweep.uuid}`, files);
     texture.coordinatesMode = Texture.SKYBOX_MODE;
 
     const previous = this.activeTexture;
@@ -83,7 +86,7 @@ export class TourViewer {
     this.activeTexture = texture;
     previous?.dispose(); // VRAM discipline
 
-    this.camera.setTarget(new Vector3(sweep.position[0], sweep.position[1], sweep.position[2]));
+    this.camera.position.set(sweep.position[0], sweep.position[1], sweep.position[2]);
     this.activeUuid = uuid;
     this.onSweepShown?.(uuid);
   }
@@ -99,14 +102,61 @@ export class TourViewer {
   }
 
   dispose(): void {
+    this.detachControls?.();
+    this.detachControls = null;
     this.activeTexture?.dispose();
     this.scene.dispose();
   }
 
-  private loadCubeTexture(files: string[]): Promise<CubeTexture> {
+  private attachPanoControls(canvas: HTMLCanvasElement | null): void {
+    if (!canvas) return;
+    let dragging = false;
+    let lastX = 0;
+    let lastY = 0;
+
+    const onPointerDown = (event: PointerEvent) => {
+      dragging = true;
+      lastX = event.clientX;
+      lastY = event.clientY;
+      canvas.setPointerCapture(event.pointerId);
+    };
+    const onPointerMove = (event: PointerEvent) => {
+      if (!dragging) return;
+      const dx = event.clientX - lastX;
+      const dy = event.clientY - lastY;
+      lastX = event.clientX;
+      lastY = event.clientY;
+      // Grab-the-world: the view rotates opposite to the drag direction.
+      this.yaw -= dx * DRAG_SENSITIVITY;
+      this.pitch = Math.max(
+        -PITCH_LIMIT,
+        Math.min(PITCH_LIMIT, this.pitch - dy * DRAG_SENSITIVITY),
+      );
+      this.camera.rotation.set(this.pitch, this.yaw, 0);
+    };
+    const onPointerUp = (event: PointerEvent) => {
+      dragging = false;
+      if (canvas.hasPointerCapture(event.pointerId)) {
+        canvas.releasePointerCapture(event.pointerId);
+      }
+    };
+
+    canvas.addEventListener("pointerdown", onPointerDown);
+    canvas.addEventListener("pointermove", onPointerMove);
+    canvas.addEventListener("pointerup", onPointerUp);
+    canvas.addEventListener("pointercancel", onPointerUp);
+    this.detachControls = () => {
+      canvas.removeEventListener("pointerdown", onPointerDown);
+      canvas.removeEventListener("pointermove", onPointerMove);
+      canvas.removeEventListener("pointerup", onPointerUp);
+      canvas.removeEventListener("pointercancel", onPointerUp);
+    };
+  }
+
+  private loadCubeTexture(cacheKey: string, files: string[]): Promise<CubeTexture> {
     return new Promise((resolve, reject) => {
       const texture = new CubeTexture(
-        "",
+        cacheKey,
         this.scene,
         null,
         false,
