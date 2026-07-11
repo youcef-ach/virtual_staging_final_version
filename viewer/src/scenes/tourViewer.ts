@@ -17,37 +17,23 @@ const DRAG_SENSITIVITY = 0.0025;
 const PITCH_LIMIT = Math.PI / 2 - 0.02;
 
 /**
- * F4.4 calibration: the extracted faces are in the scanner Z-up frame; the
- * viewer world is Y-up. The correction is a single global rotation applied to
- * the cube texture's reflection matrix at runtime (never baked into faces).
- * Cycle candidates with the O key (+ M for mirror) and lock the winner.
+ * F4.4 LOCKED calibration (validated 2026-07-11 on the 198-sweep apartment):
+ * extracted faces are in the scanner Z-up frame, the viewer world is
+ * right-handed Y-up. Correction = mirror X, then rotX-90, applied to the cube
+ * texture's reflection matrix at runtime — Layer 1 pixels stay untouched.
+ * Do not change without re-running the F4.4 visual calibration.
  */
-const ORIENTATIONS: { label: string; matrix: Matrix }[] = [
-  { label: "identity", matrix: Matrix.Identity() },
-  { label: "rotX+90", matrix: Matrix.RotationX(Math.PI / 2) },
-  { label: "rotX-90", matrix: Matrix.RotationX(-Math.PI / 2) },
-  { label: "rotZ+90", matrix: Matrix.RotationZ(Math.PI / 2) },
-  { label: "rotZ-90", matrix: Matrix.RotationZ(-Math.PI / 2) },
-  { label: "rotX180", matrix: Matrix.RotationX(Math.PI) },
-  { label: "rotY180", matrix: Matrix.RotationY(Math.PI) },
-  {
-    label: "rotX+90*rotY180",
-    matrix: Matrix.RotationX(Math.PI / 2).multiply(Matrix.RotationY(Math.PI)),
-  },
-  {
-    label: "rotX-90*rotY180",
-    matrix: Matrix.RotationX(-Math.PI / 2).multiply(Matrix.RotationY(Math.PI)),
-  },
-];
-
-/** Analytic guess for Z-up -> Y-up as the starting candidate. */
-const DEFAULT_ORIENTATION_INDEX = 1;
+const SKYBOX_ORIENTATION: Matrix = Matrix.Scaling(-1, 1, 1).multiply(
+  Matrix.RotationX(-Math.PI / 2),
+);
 
 /**
  * Layer 1 renderer: the photographic layer. The active sweep's cubemap is an
  * unlit skybox, rendered as-is, never modified (visual truth).
  *
  * Camera: inside-out look-around (FreeCamera + deterministic drag handler).
+ * All orientation goes through applyLook() — one code path for the initial
+ * view, sweep jumps and drags (avoids RH TargetCamera path discrepancies).
  * Yaw/pitch persist across sweep jumps for continuity.
  *
  * VRAM discipline: only the active sweep's cubemap stays resident.
@@ -55,7 +41,6 @@ const DEFAULT_ORIENTATION_INDEX = 1;
 export class TourViewer {
   readonly scene: Scene;
   onSweepShown?: (uuid: string) => void;
-  onCalibrationChanged?: (label: string) => void;
 
   private readonly camera: FreeCamera;
   private readonly skyboxMaterial: StandardMaterial;
@@ -64,8 +49,6 @@ export class TourViewer {
   private yaw = 0;
   private pitch = 0;
   private detachControls: (() => void) | null = null;
-  private orientationIndex = DEFAULT_ORIENTATION_INDEX;
-  private mirrored = false;
 
   constructor(
     engine: AbstractEngine,
@@ -81,8 +64,6 @@ export class TourViewer {
     this.camera.fov = 1.15;
     this.camera.inputs.clear(); // deterministic pano controls below
     this.attachPanoControls(engine.getRenderingCanvas());
-    // Single orientation code path from frame one (avoids the RH TargetCamera
-    // 180-degree discrepancy between setTarget and direct rotation writes).
     this.applyLook();
 
     const skybox = CreateBox("skybox", { size: 512 }, this.scene);
@@ -100,23 +81,6 @@ export class TourViewer {
     return this.activeUuid;
   }
 
-  get calibrationLabel(): string {
-    const base = ORIENTATIONS[this.orientationIndex].label;
-    return `${base}${this.mirrored ? " +mirror" : ""} [${this.orientationIndex}]`;
-  }
-
-  /** F4.4 calibration: cycle to the next candidate orientation. */
-  cycleOrientation(): void {
-    this.orientationIndex = (this.orientationIndex + 1) % ORIENTATIONS.length;
-    this.applyOrientation();
-  }
-
-  /** F4.4 calibration: toggle a mirror on top of the current orientation. */
-  toggleMirror(): void {
-    this.mirrored = !this.mirrored;
-    this.applyOrientation();
-  }
-
   /** Load a sweep's cubemap and move the camera to its pose position. */
   async showSweep(uuid: string): Promise<void> {
     const sweep = this.tour.sweeps.find((s) => s.uuid === uuid);
@@ -127,7 +91,7 @@ export class TourViewer {
     // Unique cache key per sweep: Babylon caches cube textures by rootUrl.
     const texture = await this.loadCubeTexture(`sweep:${sweep.uuid}`, files);
     texture.coordinatesMode = Texture.SKYBOX_MODE;
-    texture.setReflectionTextureMatrix(this.currentOrientationMatrix());
+    texture.setReflectionTextureMatrix(SKYBOX_ORIENTATION);
 
     const previous = this.activeTexture;
     this.skyboxMaterial.reflectionTexture = texture;
@@ -166,16 +130,6 @@ export class TourViewer {
       Math.cos(this.yaw) * cosPitch,
     );
     this.camera.setTarget(this.camera.position.add(direction));
-  }
-
-  private currentOrientationMatrix(): Matrix {
-    const base = ORIENTATIONS[this.orientationIndex].matrix;
-    return this.mirrored ? Matrix.Scaling(-1, 1, 1).multiply(base) : base;
-  }
-
-  private applyOrientation(): void {
-    this.activeTexture?.setReflectionTextureMatrix(this.currentOrientationMatrix());
-    this.onCalibrationChanged?.(this.calibrationLabel);
   }
 
   private attachPanoControls(canvas: HTMLCanvasElement | null): void {

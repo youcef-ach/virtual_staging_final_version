@@ -70,12 +70,12 @@ lightweight streaming web viewer.
   - [x] F3.2 FastAPI upload endpoint: receive `.e57` + Matterpak + cubemaps, validate completeness + checksums
   - [x] F3.3 Immutable raw storage layout `/raw/{property_id}/{version}/` (S3-compatible; local FS for dev)
   - [x] F3.4 `scan_versions` registration with `is_authoritative` flag; status → `INGESTED`
-- [ ] **F4. Cubemap viewer (Babylon.js)**
+- [x] **F4. Cubemap viewer (Babylon.js)** ✅ *validated 2026-07-11 on the 198-sweep apartment scan*
   - [x] F4.0 Extract embedded per-sweep cubemap faces from E57 `images2D` (pye57 low-level API), keyed to sweep UUIDs, manifest.json *(added: source data ships panoramas inside the .e57)* ✅ *validated 2026-07-11: 198/198 sweeps with all 6 faces, Set A canonical transforms applied, 52 tests green*
-  - [ ] F4.1 WebGPUEngine async init, `powerPreference: high-performance`, WebGL2 fallback
-  - [ ] F4.2 Load active sweep cubemap as unlit skybox (Layer 1)
-  - [ ] F4.3 Sweep switching via `scan_positions` hotspot coordinates (simple jump; morphing comes in M7–9)
-  - [ ] F4.4 Face-orientation calibration: verify canonical Set A transforms (pre-seeded from the proven pipeline) against Babylon.js; apply any global adjustment at runtime only (seams visually correct in the viewer)
+  - [x] F4.1 WebGPUEngine async init, `powerPreference: high-performance`, WebGL2 fallback
+  - [x] F4.2 Load active sweep cubemap as unlit skybox (Layer 1)
+  - [x] F4.3 Sweep switching via `scan_positions` hotspot coordinates (simple jump via sweep panel + prev/next; morphing comes in M7–9)
+  - [x] F4.4 Face-orientation calibration ✅ **locked: `mirrorX · rotX-90`** on the cube texture reflection matrix (runtime-only, Layer 1 pixels untouched); pano camera single-code-path orientation (no 180° jump)
 - [ ] **F5. Automated pose-QA scoring (Gate 1)**
   - [ ] F5.1 Headless Blender (bpy): render Matterpak OBJ wireframe from each sweep pose
   - [ ] F5.2 Canny edge map of panorama vs projected mesh edges → edge-overlap score
