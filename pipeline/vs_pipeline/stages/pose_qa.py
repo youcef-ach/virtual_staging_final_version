@@ -358,7 +358,9 @@ def calibrate_face_mapping(
 def _write_composite_grid(
     faces: list[tuple[str, float, np.ndarray, np.ndarray, str]], out_path: Path
 ) -> None:
-    """Stacked review image: one row per face = pano | pano with red render edges."""
+    """Stacked review image, one row per face:
+    pano | rendered OBJ view (oriented normalized depth) | pano + red render edges.
+    """
     rows: list[np.ndarray] = []
     for face_name, score, pano_gray, render_gray, orientation in faces:
         render_edges = _render_edges(render_gray, orientation)
@@ -368,9 +370,11 @@ def _write_composite_grid(
             interpolation=cv2.INTER_AREA,
         )
         color = cv2.cvtColor(pano_small, cv2.COLOR_GRAY2BGR)
+        oriented_render = np.ascontiguousarray(apply_orientation(render_gray, orientation))
+        render_view = cv2.cvtColor(oriented_render, cv2.COLOR_GRAY2BGR)
         overlay = color.copy()
         overlay[render_edges > 0] = (0, 0, 255)
-        row = np.hstack([color, overlay])
+        row = np.hstack([color, render_view, overlay])
         cv2.putText(
             row,
             f"{face_name}  {score:.2f}",

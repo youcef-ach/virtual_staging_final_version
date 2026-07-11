@@ -239,8 +239,9 @@ export default function App() {
                     alt={`review composite for sweep ${selected.index}`}
                   />
                   <figcaption>
-                    Left: panorama face · Right: rendered geometry edges in red. Rows are the
-                    informative faces with their normalized scores.
+                    Columns: panorama · OBJ render (normalized depth, oriented) · panorama with
+                    rendered edges in red. Rows are the informative faces with their normalized
+                    scores.
                   </figcaption>
                 </figure>
               ) : (
