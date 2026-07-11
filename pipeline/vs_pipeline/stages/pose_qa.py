@@ -11,10 +11,12 @@ Pipeline:
    score = mean over faces. score < 0.85 -> flagged for operator review.
    A deterministic ~10% of sweeps is always marked for spot-check.
 
-Render-orientation auto-calibration: the in-plane orientation of rendered
-faces vs extracted faces is unknown a priori (like F4.4). The scorer tries 8
-orientations (4 rotations x flip) per face on sample sweeps and locks the
-argmax — the overlap metric itself is the calibration signal.
+Face-mapping auto-calibration: extracted faces carry the canonical Set A
+transforms (including the +Z/-Z content swap) plus the viewer-level mirror,
+so extracted face N does not necessarily correspond to rendered face N.
+Calibration searches ALL 6 rendered faces x 8 in-plane orientations per
+extracted face on sample sweeps and locks a bijective assignment — the
+overlap metric itself is the calibration signal.
 
 CLI:
     python -m vs_pipeline.stages.pose_qa prepare poses.json -o render_jobs.json
@@ -36,10 +38,11 @@ import numpy as np
 from vs_pipeline.coordinates import convert_pose_yup_to_zup
 from vs_pipeline.stages.pose import SweepPose, read_poses_json
 
-QA_SCHEMA_VERSION = 1
+QA_SCHEMA_VERSION = 2
 DEFAULT_THRESHOLD = 0.85
 SPOT_CHECK_RATE = 0.1
 DEFAULT_RENDER_SIZE = 512
+DILATE_PX = 5
 
 FACE_NAMES = ("px", "nx", "py", "ny", "pz", "nz")
 
@@ -159,22 +162,20 @@ def _load_gray(path: Path) -> np.ndarray | None:
     return image
 
 
-def edge_overlap_score(
-    pano_gray: np.ndarray,
-    render_gray: np.ndarray,
-    orientation: str = "rot0",
-    dilate_px: int = 5,
-) -> float:
-    """Fraction of rendered geometry edges that land on (dilated) pano edges."""
-    oriented = np.ascontiguousarray(apply_orientation(render_gray, orientation))
-    if pano_gray.shape != oriented.shape:
-        pano_gray = cv2.resize(
-            pano_gray, (oriented.shape[1], oriented.shape[0]), interpolation=cv2.INTER_AREA
-        )
-    pano_edges = cv2.Canny(pano_gray, 50, 150)
-    kernel = np.ones((dilate_px, dilate_px), np.uint8)
-    pano_dilated = cv2.dilate(pano_edges, kernel)
-    render_edges = cv2.Canny(oriented, 20, 60)
+def _pano_edges_dilated(pano_gray: np.ndarray, size: tuple[int, int]) -> np.ndarray:
+    if pano_gray.shape != size:
+        pano_gray = cv2.resize(pano_gray, (size[1], size[0]), interpolation=cv2.INTER_AREA)
+    edges = cv2.Canny(pano_gray, 50, 150)
+    kernel = np.ones((DILATE_PX, DILATE_PX), np.uint8)
+    return cv2.dilate(edges, kernel)
+
+
+def _render_edges(render_gray: np.ndarray, op: str) -> np.ndarray:
+    oriented = np.ascontiguousarray(apply_orientation(render_gray, op))
+    return cv2.Canny(oriented, 20, 60)
+
+
+def _overlap(pano_dilated: np.ndarray, render_edges: np.ndarray) -> float:
     total = int(np.count_nonzero(render_edges))
     if total == 0:
         return 0.0
@@ -182,44 +183,105 @@ def edge_overlap_score(
     return hits / total
 
 
-def calibrate_orientations(
+def edge_overlap_score(
+    pano_gray: np.ndarray,
+    render_gray: np.ndarray,
+    orientation: str = "rot0",
+    dilate_px: int = DILATE_PX,  # noqa: ARG001 (kept for API stability)
+) -> float:
+    """Fraction of rendered geometry edges that land on (dilated) pano edges."""
+    render_edges = _render_edges(render_gray, orientation)
+    pano_dilated = _pano_edges_dilated(pano_gray, render_edges.shape)
+    return _overlap(pano_dilated, render_edges)
+
+
+def _bijective_assignment(
+    combo_scores: dict[tuple[str, str, str], float],
+) -> dict[str, dict[str, object]]:
+    """Greedy best-score bijection: extracted face -> (rendered face, op)."""
+    mapping: dict[str, dict[str, object]] = {}
+    used_render: set[str] = set()
+    for (ext_face, render_face, op), score in sorted(
+        combo_scores.items(), key=lambda item: item[1], reverse=True
+    ):
+        if ext_face in mapping or render_face in used_render:
+            continue
+        mapping[ext_face] = {"render_face": render_face, "op": op, "mean": round(score, 4)}
+        used_render.add(render_face)
+        if len(mapping) == len(FACE_NAMES):
+            break
+    return mapping
+
+
+def calibrate_face_mapping(
     pano_dir: Path,
     render_dir: Path,
     sweeps: list[SweepPose],
     sample_count: int = 5,
-) -> dict[str, str]:
-    """Pick the best in-plane orientation per face (argmax mean overlap)."""
+) -> dict[str, dict[str, object]]:
+    """Search all 6 rendered faces x 8 orientations per extracted face."""
     step = max(1, len(sweeps) // sample_count)
     samples = sweeps[::step][:sample_count]
-    calibration: dict[str, str] = {}
-    for face in FACE_NAMES:
-        best_op, best_score = "rot0", -1.0
-        for op in ORIENTATION_OPS:
-            scores: list[float] = []
-            for sweep in samples:
-                pano = _load_gray(pano_dir / sweep.sweep_uuid / f"{face}.jpg")
-                render = _load_gray(render_dir / sweep.sweep_uuid / f"{face}.png")
-                if pano is None or render is None:
-                    continue
-                scores.append(edge_overlap_score(pano, render, op))
-            if scores:
-                mean = float(np.mean(scores))
-                if mean > best_score:
-                    best_op, best_score = op, mean
-        calibration[face] = best_op
-        print(f"  calibration {face}: {best_op} (mean overlap {best_score:.3f})")
-    return calibration
+
+    # Cache rendered edge maps per (render face, sample, op).
+    render_edge_cache: dict[tuple[str, str, str], np.ndarray] = {}
+    render_shape: tuple[int, int] | None = None
+    for render_face in FACE_NAMES:
+        for sweep in samples:
+            gray = _load_gray(render_dir / sweep.sweep_uuid / f"{render_face}.png")
+            if gray is None:
+                continue
+            for op in ORIENTATION_OPS:
+                edges = _render_edges(gray, op)
+                render_edge_cache[(render_face, sweep.sweep_uuid, op)] = edges
+                render_shape = edges.shape
+    if render_shape is None:
+        raise ValueError(f"no rendered faces found under {render_dir}")
+
+    # Cache dilated pano edges per (extracted face, sample).
+    pano_cache: dict[tuple[str, str], np.ndarray] = {}
+    for ext_face in FACE_NAMES:
+        for sweep in samples:
+            gray = _load_gray(pano_dir / sweep.sweep_uuid / f"{ext_face}.jpg")
+            if gray is None:
+                continue
+            pano_cache[(ext_face, sweep.sweep_uuid)] = _pano_edges_dilated(gray, render_shape)
+
+    combo_scores: dict[tuple[str, str, str], float] = {}
+    for ext_face in FACE_NAMES:
+        for render_face in FACE_NAMES:
+            for op in ORIENTATION_OPS:
+                values: list[float] = []
+                for sweep in samples:
+                    pano = pano_cache.get((ext_face, sweep.sweep_uuid))
+                    render = render_edge_cache.get((render_face, sweep.sweep_uuid, op))
+                    if pano is None or render is None:
+                        continue
+                    values.append(_overlap(pano, render))
+                if values:
+                    combo_scores[(ext_face, render_face, op)] = float(np.mean(values))
+
+    mapping = _bijective_assignment(combo_scores)
+    for ext_face in FACE_NAMES:
+        entry = mapping.get(ext_face)
+        if entry:
+            print(
+                f"  calibration {ext_face} <- render {entry['render_face']} "
+                f"({entry['op']}), mean overlap {entry['mean']}"
+            )
+        else:
+            print(f"  calibration {ext_face}: NO MATCH (missing data)")
+    return mapping
 
 
 def _write_composite(
     pano_gray: np.ndarray, render_gray: np.ndarray, orientation: str, out_path: Path
 ) -> None:
     """Side-by-side review image: pano | pano with rendered edges in red."""
-    oriented = np.ascontiguousarray(apply_orientation(render_gray, orientation))
+    render_edges = _render_edges(render_gray, orientation)
     pano_small = cv2.resize(
-        pano_gray, (oriented.shape[1], oriented.shape[0]), interpolation=cv2.INTER_AREA
+        pano_gray, (render_edges.shape[1], render_edges.shape[0]), interpolation=cv2.INTER_AREA
     )
-    render_edges = cv2.Canny(oriented, 20, 60)
     color = cv2.cvtColor(pano_small, cv2.COLOR_GRAY2BGR)
     overlay = color.copy()
     overlay[render_edges > 0] = (0, 0, 255)
@@ -236,27 +298,35 @@ def score_property(
     threshold: float = DEFAULT_THRESHOLD,
     calibration_samples: int = 5,
 ) -> list[SweepQAResult]:
-    """Score every sweep; write pose_qa.json + review composites."""
+    """Score every rendered sweep; write pose_qa.json + review composites."""
     sweeps = read_poses_json(poses_path)
     rendered = [s for s in sweeps if (render_dir / s.sweep_uuid).is_dir()]
     if not rendered:
         raise ValueError(f"no rendered sweeps found under {render_dir}")
 
-    print(f"auto-calibrating render orientation on {min(calibration_samples, len(rendered))} sample sweep(s):")
-    calibration = calibrate_orientations(pano_dir, render_dir, rendered, calibration_samples)
+    print(
+        f"auto-calibrating face mapping on {min(calibration_samples, len(rendered))} "
+        "sample sweep(s):"
+    )
+    calibration = calibrate_face_mapping(pano_dir, render_dir, rendered, calibration_samples)
 
     results: list[SweepQAResult] = []
     composites_dir = output_dir / "composites"
     for sweep in rendered:
         face_scores: dict[str, float] = {}
-        faces_gray: dict[str, tuple[np.ndarray, np.ndarray]] = {}
-        for face in FACE_NAMES:
-            pano = _load_gray(pano_dir / sweep.sweep_uuid / f"{face}.jpg")
-            render = _load_gray(render_dir / sweep.sweep_uuid / f"{face}.png")
+        faces_gray: dict[str, tuple[np.ndarray, np.ndarray, str]] = {}
+        for ext_face in FACE_NAMES:
+            entry = calibration.get(ext_face)
+            if not entry:
+                continue
+            render_face = str(entry["render_face"])
+            op = str(entry["op"])
+            pano = _load_gray(pano_dir / sweep.sweep_uuid / f"{ext_face}.jpg")
+            render = _load_gray(render_dir / sweep.sweep_uuid / f"{render_face}.png")
             if pano is None or render is None:
                 continue
-            face_scores[face] = edge_overlap_score(pano, render, calibration[face])
-            faces_gray[face] = (pano, render)
+            face_scores[ext_face] = edge_overlap_score(pano, render, op)
+            faces_gray[ext_face] = (pano, render, op)
         score = float(np.mean(list(face_scores.values()))) if face_scores else None
         flagged = score is None or score < threshold
         spot = is_spot_check(sweep.sweep_uuid)
@@ -272,11 +342,11 @@ def score_property(
         )
         if (flagged or spot) and face_scores:
             worst_face = min(face_scores, key=lambda f: face_scores[f])
-            pano, render = faces_gray[worst_face]
+            pano, render, op = faces_gray[worst_face]
             _write_composite(
                 pano,
                 render,
-                calibration[worst_face],
+                op,
                 composites_dir / f"{sweep.index:03d}_{sweep.sweep_uuid}_{worst_face}.jpg",
             )
 
@@ -347,7 +417,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\n{len(results)} sweep(s) scored, mean edge-overlap {mean:.3f}")
     print(f"flagged (< {args.threshold}): {len(flagged)}   spot-check: {len(spot)}")
     for r in sorted(flagged, key=lambda r: (r.score is not None, r.score)):
-        print(f"  FLAG [{r.index:03d}] {r.sweep_uuid}  score = {r.score if r.score is not None else 'n/a'}")
+        print(
+            f"  FLAG [{r.index:03d}] {r.sweep_uuid}  "
+            f"score = {r.score if r.score is not None else 'n/a'}"
+        )
     print(f"report: {args.output / 'pose_qa.json'}   composites: {args.output / 'composites'}")
     return 0
 

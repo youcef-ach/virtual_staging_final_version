@@ -5,12 +5,16 @@ pinhole cameras from render_jobs.json (produced by vs_pipeline.stages.pose_qa
 prepare). Geometry discontinuities in these depth maps are compared against
 panorama edges by the scorer.
 
-Requires Blender 4.x. Usage (Windows: use the full path to blender.exe if not
-on PATH):
+Supports Blender 4.x (scene.node_tree) and 5.x (scene.compositing_node_group).
+
+Coordinate note (MatterPak readme): the OBJ is right-handed Z-up, 1 unit = 1 m
+— the same frame as the E57 — hence the default --obj-up Z import.
+
+Usage (Windows: use the full path to blender.exe if not on PATH):
 
     blender --background --python pipeline/blender/render_edges.py -- \
         --obj path/to/matterpak.obj --jobs render_jobs.json --out qa_renders \
-        [--limit 10] [--obj-up Y|Z]
+        [--limit 10] [--obj-up Z|Y]
 """
 
 import argparse
@@ -37,9 +41,9 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=0, help="render only the first N sweeps")
     parser.add_argument(
         "--obj-up",
-        choices=["Y", "Z"],
-        default="Y",
-        help="up axis of the OBJ file (Matterpak default: Y)",
+        choices=["Z", "Y"],
+        default="Z",
+        help="up axis of the OBJ file (MatterPak readme: right-handed Z-up)",
     )
     args = parser.parse_args(_script_argv())
 
@@ -62,21 +66,39 @@ def main() -> None:
     scene.render.image_settings.file_format = "PNG"
     scene.render.image_settings.color_mode = "BW"
     scene.render.image_settings.color_depth = "16"
+    scene.render.use_compositing = True
 
     view_layer = scene.view_layers[0]
     view_layer.use_pass_z = True
 
-    # Compositor: Depth -> Normalize -> Composite (per-image normalized depth;
+    # Compositor: Depth -> Normalize -> output (per-image normalized depth;
     # only discontinuities matter for edge scoring, not metric values).
-    scene.use_nodes = True
-    tree = scene.node_tree
-    for node in list(tree.nodes):
-        tree.nodes.remove(node)
-    render_layers = tree.nodes.new("CompositorNodeRLayers")
-    normalize = tree.nodes.new("CompositorNodeNormalize")
-    composite = tree.nodes.new("CompositorNodeComposite")
-    tree.links.new(render_layers.outputs["Depth"], normalize.inputs[0])
-    tree.links.new(normalize.outputs[0], composite.inputs["Image"])
+    if hasattr(scene, "compositing_node_group"):
+        # Blender 5.x compositor node group API.
+        if scene.compositing_node_group is None:
+            scene.compositing_node_group = bpy.data.node_groups.new(
+                "Compositor", "CompositorNodeTree"
+            )
+        tree = scene.compositing_node_group
+        for node in list(tree.nodes):
+            tree.nodes.remove(node)
+        render_layers = tree.nodes.new("CompositorNodeRLayers")
+        normalize = tree.nodes.new("CompositorNodeNormalize")
+        group_output = tree.nodes.new("NodeGroupOutput")
+        tree.interface.new_socket(name="Image", in_out="OUTPUT", socket_type="NodeSocketColor")
+        tree.links.new(render_layers.outputs["Depth"], normalize.inputs[0])
+        tree.links.new(normalize.outputs[0], group_output.inputs["Image"])
+    else:
+        # Blender 4.x compositor API.
+        scene.use_nodes = True
+        tree = scene.node_tree
+        for node in list(tree.nodes):
+            tree.nodes.remove(node)
+        render_layers = tree.nodes.new("CompositorNodeRLayers")
+        normalize = tree.nodes.new("CompositorNodeNormalize")
+        composite = tree.nodes.new("CompositorNodeComposite")
+        tree.links.new(render_layers.outputs["Depth"], normalize.inputs[0])
+        tree.links.new(normalize.outputs[0], composite.inputs["Image"])
 
     cam_data = bpy.data.cameras.new("qa_cam")
     cam_data.angle = math.radians(90.0)  # cube-face FOV
@@ -86,7 +108,9 @@ def main() -> None:
     scene.collection.objects.link(cam)
     scene.camera = cam
 
-    out_root = Path(args.out)
+    # Resolve to absolute: Blender resolves relative render paths against its
+    # own working directory, not the invoking shell's.
+    out_root = Path(args.out).resolve()
     sweeps = jobs["sweeps"]
     if args.limit > 0:
         sweeps = sweeps[: args.limit]

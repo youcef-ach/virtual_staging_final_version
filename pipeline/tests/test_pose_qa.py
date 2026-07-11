@@ -8,12 +8,33 @@ from vs_pipeline.stages.pose import SweepPose, write_poses_json
 from vs_pipeline.stages.pose_qa import (
     FACE_NAMES,
     ORIENTATION_OPS,
+    _bijective_assignment,
     apply_orientation,
     edge_overlap_score,
     face_camera_matrix,
     is_spot_check,
     prepare_render_jobs,
 )
+
+
+def test_bijective_assignment_prefers_best_scores() -> None:
+    combo_scores = {
+        ("px", "nx", "rot180"): 0.95,
+        ("px", "px", "rot0"): 0.40,
+        ("nx", "px", "rot180"): 0.90,
+        ("nx", "nx", "rot0"): 0.42,
+        ("py", "py", "rot0"): 0.88,
+        ("ny", "ny", "rot0_flip"): 0.87,
+        ("pz", "nz", "rot90"): 0.86,
+        ("nz", "pz", "rot270"): 0.85,
+    }
+    mapping = _bijective_assignment(combo_scores)
+    assert mapping["px"]["render_face"] == "nx"
+    assert mapping["nx"]["render_face"] == "px"
+    assert mapping["pz"]["render_face"] == "nz"
+    # Bijection: each rendered face used at most once.
+    used = [entry["render_face"] for entry in mapping.values()]
+    assert len(used) == len(set(used))
 
 
 def _random_pose(seed: int) -> np.ndarray:
