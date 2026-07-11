@@ -35,3 +35,19 @@ Thumbs.db
 *.glb
 *.ktx2
 data/
+
+# Pipeline artifacts (regenerable, local-only)
+pipeline/poses.json
+pipeline/render_jobs.json
+pipeline/*_jobs.json
+pipeline/extracted_cubemaps/
+pipeline/qa_renders/
+pipeline/qa_output/
+pipeline/qa_verify*/
+pipeline/verify_renders/
+pipeline/verify_output/
+pipeline/perturb_renders/
+pipeline/perturb_output/
+pipeline/calibration*.json*
+pipeline/diag_*.py
+dashboard/public/qa/
