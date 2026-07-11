@@ -71,9 +71,11 @@ lightweight streaming web viewer.
   - [ ] F3.3 Immutable raw storage layout `/raw/{property_id}/{version}/` (S3-compatible; local FS for dev)
   - [ ] F3.4 `scan_versions` registration with `is_authoritative` flag; status → `INGESTED`
 - [ ] **F4. Cubemap viewer (Babylon.js)**
+  - [ ] F4.0 Extract embedded per-sweep cubemap faces from E57 `images2D` (pye57 low-level API), keyed to sweep UUIDs, manifest.json *(added: source data ships panoramas inside the .e57)*
   - [ ] F4.1 WebGPUEngine async init, `powerPreference: high-performance`, WebGL2 fallback
   - [ ] F4.2 Load active sweep cubemap as unlit skybox (Layer 1)
   - [ ] F4.3 Sweep switching via `scan_positions` hotspot coordinates (simple jump; morphing comes in M7–9)
+  - [ ] F4.4 Face-orientation calibration: lock `FACE_TRANSFORMS` (seams visually correct in the viewer)
 - [ ] **F5. Automated pose-QA scoring (Gate 1)**
   - [ ] F5.1 Headless Blender (bpy): render Matterpak OBJ wireframe from each sweep pose
   - [ ] F5.2 Canny edge map of panorama vs projected mesh edges → edge-overlap score

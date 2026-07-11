@@ -4,6 +4,7 @@ Planned modules (implemented per PLAN.md phases):
 
 - ``ingest``        : Stage 1  - ingest & validate            (F3)
 - ``pose``          : Stage 2  - pose extraction & QA, Gate 1 (F2/F5)
+- ``panorama``      : Stage 2b - embedded cubemap extraction        (F4.0)
 - ``preprocess``    : Stage 3  - point cloud preprocessing    (G1)
 - ``segmentation``  : Stage 4  - semantic segmentation, Gate 2 (G6)
 - ``planes``        : Stage 5  - plane fitting & boundaries   (G2)
