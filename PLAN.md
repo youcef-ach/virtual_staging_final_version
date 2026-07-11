@@ -65,13 +65,13 @@ lightweight streaming web viewer.
   - [x] F2.2 Apply the coordinate conversion (Z-up → Y-up) exactly once, at ingestion
   - [x] F2.3 Emit `poses.json` (sweep UUID → 4×4 matrix, runtime frame)
   - [x] F2.4 Unit tests: round-trip conversion, origin preservation invariant
-- [ ] **F3. Ingestion & versioning API**
-  - [ ] F3.1 PostgreSQL 16 schema — initial migration (`organizations`, `users`, `properties`, `scan_versions`, `scan_positions`, `structural_planes`, `navigation_graph`, `catalog`, `staging_projects`, `qa_reviews`, `publish_states`)
-  - [ ] F3.2 FastAPI upload endpoint: receive `.e57` + Matterpak + cubemaps, validate completeness + checksums
-  - [ ] F3.3 Immutable raw storage layout `/raw/{property_id}/{version}/` (S3-compatible; local FS for dev)
-  - [ ] F3.4 `scan_versions` registration with `is_authoritative` flag; status → `INGESTED`
+- [x] **F3. Ingestion & versioning API** ✅ *validated 2026-07-11: real 26 GB E57 uploaded → 201, SHA-256 registered, immutable key `raw/{property_id}/v1/`, authoritative v1, status `ingested`*
+  - [x] F3.1 PostgreSQL 16 schema — initial migration (`organizations`, `users`, `properties`, `scan_versions`, `scan_positions`, `structural_planes`, `navigation_graph`, `catalog`, `staging_projects`, `qa_reviews`, `publish_states`)
+  - [x] F3.2 FastAPI upload endpoint: receive `.e57` + Matterpak + cubemaps, validate completeness + checksums
+  - [x] F3.3 Immutable raw storage layout `/raw/{property_id}/{version}/` (S3-compatible; local FS for dev)
+  - [x] F3.4 `scan_versions` registration with `is_authoritative` flag; status → `INGESTED`
 - [ ] **F4. Cubemap viewer (Babylon.js)**
-  - [ ] F4.0 Extract embedded per-sweep cubemap faces from E57 `images2D` (pye57 low-level API), keyed to sweep UUIDs, manifest.json *(added: source data ships panoramas inside the .e57)*
+  - [x] F4.0 Extract embedded per-sweep cubemap faces from E57 `images2D` (pye57 low-level API), keyed to sweep UUIDs, manifest.json *(added: source data ships panoramas inside the .e57)* ✅ *validated 2026-07-11: 198/198 sweeps with all 6 faces, Set A canonical transforms applied, 52 tests green*
   - [ ] F4.1 WebGPUEngine async init, `powerPreference: high-performance`, WebGL2 fallback
   - [ ] F4.2 Load active sweep cubemap as unlit skybox (Layer 1)
   - [ ] F4.3 Sweep switching via `scan_positions` hotspot coordinates (simple jump; morphing comes in M7–9)
