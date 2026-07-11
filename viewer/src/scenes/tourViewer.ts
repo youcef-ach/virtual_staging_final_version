@@ -1,7 +1,7 @@
 import type { AbstractEngine } from "@babylonjs/core/Engines/abstractEngine";
 import { Scene } from "@babylonjs/core/scene";
 import { FreeCamera } from "@babylonjs/core/Cameras/freeCamera";
-import { Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { Matrix, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
 import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
@@ -17,20 +17,45 @@ const DRAG_SENSITIVITY = 0.0025;
 const PITCH_LIMIT = Math.PI / 2 - 0.02;
 
 /**
+ * F4.4 calibration: the extracted faces are in the scanner Z-up frame; the
+ * viewer world is Y-up. The correction is a single global rotation applied to
+ * the cube texture's reflection matrix at runtime (never baked into faces).
+ * Cycle candidates with the O key (+ M for mirror) and lock the winner.
+ */
+const ORIENTATIONS: { label: string; matrix: Matrix }[] = [
+  { label: "identity", matrix: Matrix.Identity() },
+  { label: "rotX+90", matrix: Matrix.RotationX(Math.PI / 2) },
+  { label: "rotX-90", matrix: Matrix.RotationX(-Math.PI / 2) },
+  { label: "rotZ+90", matrix: Matrix.RotationZ(Math.PI / 2) },
+  { label: "rotZ-90", matrix: Matrix.RotationZ(-Math.PI / 2) },
+  { label: "rotX180", matrix: Matrix.RotationX(Math.PI) },
+  { label: "rotY180", matrix: Matrix.RotationY(Math.PI) },
+  {
+    label: "rotX+90*rotY180",
+    matrix: Matrix.RotationX(Math.PI / 2).multiply(Matrix.RotationY(Math.PI)),
+  },
+  {
+    label: "rotX-90*rotY180",
+    matrix: Matrix.RotationX(-Math.PI / 2).multiply(Matrix.RotationY(Math.PI)),
+  },
+];
+
+/** Analytic guess for Z-up -> Y-up as the starting candidate. */
+const DEFAULT_ORIENTATION_INDEX = 1;
+
+/**
  * Layer 1 renderer: the photographic layer. The active sweep's cubemap is an
  * unlit skybox, rendered as-is, never modified (visual truth).
  *
- * Camera: inside-out look-around (FreeCamera + deterministic drag handler),
- * NOT an orbit camera — the viewer stands at the sweep position and rotates
- * in place. Yaw/pitch persist across sweep jumps for continuity.
+ * Camera: inside-out look-around (FreeCamera + deterministic drag handler).
+ * Yaw/pitch persist across sweep jumps for continuity.
  *
- * VRAM discipline: only the active sweep's cubemap stays resident; the
- * previous texture is disposed right after the swap. Each texture uses the
- * sweep UUID as its cache key (Babylon caches by rootUrl).
+ * VRAM discipline: only the active sweep's cubemap stays resident.
  */
 export class TourViewer {
   readonly scene: Scene;
   onSweepShown?: (uuid: string) => void;
+  onCalibrationChanged?: (label: string) => void;
 
   private readonly camera: FreeCamera;
   private readonly skyboxMaterial: StandardMaterial;
@@ -39,6 +64,8 @@ export class TourViewer {
   private yaw = 0;
   private pitch = 0;
   private detachControls: (() => void) | null = null;
+  private orientationIndex = DEFAULT_ORIENTATION_INDEX;
+  private mirrored = false;
 
   constructor(
     engine: AbstractEngine,
@@ -70,6 +97,23 @@ export class TourViewer {
     return this.activeUuid;
   }
 
+  get calibrationLabel(): string {
+    const base = ORIENTATIONS[this.orientationIndex].label;
+    return `${base}${this.mirrored ? " +mirror" : ""} [${this.orientationIndex}]`;
+  }
+
+  /** F4.4 calibration: cycle to the next candidate orientation. */
+  cycleOrientation(): void {
+    this.orientationIndex = (this.orientationIndex + 1) % ORIENTATIONS.length;
+    this.applyOrientation();
+  }
+
+  /** F4.4 calibration: toggle a mirror on top of the current orientation. */
+  toggleMirror(): void {
+    this.mirrored = !this.mirrored;
+    this.applyOrientation();
+  }
+
   /** Load a sweep's cubemap and move the camera to its pose position. */
   async showSweep(uuid: string): Promise<void> {
     const sweep = this.tour.sweeps.find((s) => s.uuid === uuid);
@@ -80,6 +124,7 @@ export class TourViewer {
     // Unique cache key per sweep: Babylon caches cube textures by rootUrl.
     const texture = await this.loadCubeTexture(`sweep:${sweep.uuid}`, files);
     texture.coordinatesMode = Texture.SKYBOX_MODE;
+    texture.setReflectionTextureMatrix(this.currentOrientationMatrix());
 
     const previous = this.activeTexture;
     this.skyboxMaterial.reflectionTexture = texture;
@@ -106,6 +151,16 @@ export class TourViewer {
     this.detachControls = null;
     this.activeTexture?.dispose();
     this.scene.dispose();
+  }
+
+  private currentOrientationMatrix(): Matrix {
+    const base = ORIENTATIONS[this.orientationIndex].matrix;
+    return this.mirrored ? Matrix.Scaling(-1, 1, 1).multiply(base) : base;
+  }
+
+  private applyOrientation(): void {
+    this.activeTexture?.setReflectionTextureMatrix(this.currentOrientationMatrix());
+    this.onCalibrationChanged?.(this.calibrationLabel);
   }
 
   private attachPanoControls(canvas: HTMLCanvasElement | null): void {

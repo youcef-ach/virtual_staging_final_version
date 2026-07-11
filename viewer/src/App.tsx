@@ -15,6 +15,7 @@ export default function App() {
   const errorMessage = useViewerStore((s) => s.errorMessage);
   const sweeps = useViewerStore((s) => s.sweeps);
   const activeSweepUuid = useViewerStore((s) => s.activeSweepUuid);
+  const calibration = useViewerStore((s) => s.calibration);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -39,6 +40,18 @@ export default function App() {
         const viewer = new TourViewer(engine, tour);
         viewerRef.current = viewer;
         viewer.onSweepShown = (uuid) => useViewerStore.getState().setActiveSweep(uuid);
+        viewer.onCalibrationChanged = (label) => useViewerStore.getState().setCalibration(label);
+        useViewerStore.getState().setCalibration(viewer.calibrationLabel);
+
+        // F4.4 calibration keys: O cycles orientation, M toggles mirror.
+        const onKeyDown = (event: KeyboardEvent) => {
+          if (event.key === "o" || event.key === "O") {
+            viewerRef.current?.cycleOrientation();
+          } else if (event.key === "m" || event.key === "M") {
+            viewerRef.current?.toggleMirror();
+          }
+        };
+        window.addEventListener("keydown", onKeyDown);
 
         engine.runRenderLoop(() => viewer.scene.render());
         const onResize = () => engine.resize();
@@ -50,6 +63,7 @@ export default function App() {
         cleanup = () => {
           window.clearInterval(fpsTimer);
           window.removeEventListener("resize", onResize);
+          window.removeEventListener("keydown", onKeyDown);
           viewer.dispose();
           engine.dispose();
           viewerRef.current = null;
@@ -85,6 +99,7 @@ export default function App() {
         <span>{backend ? backend.toUpperCase() : "initializing…"}</span>
         {backend !== null && <span>{fps} FPS</span>}
         {activeIndex !== undefined && <span>sweep #{String(activeIndex).padStart(3, "0")}</span>}
+        {calibration !== null && <span>cal: {calibration} (O / M)</span>}
       </div>
 
       {status === "loading" && <div className="overlay">Loading tour…</div>}
