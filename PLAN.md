@@ -70,12 +70,12 @@ lightweight streaming web viewer.
   - [x] F3.2 FastAPI upload endpoint: receive `.e57` + Matterpak + cubemaps, validate completeness + checksums
   - [x] F3.3 Immutable raw storage layout `/raw/{property_id}/{version}/` (S3-compatible; local FS for dev)
   - [x] F3.4 `scan_versions` registration with `is_authoritative` flag; status → `INGESTED`
-- [ ] **F4. Cubemap viewer (Babylon.js)**
+- [x] **F4. Cubemap viewer (Babylon.js)** ✅ *validated 2026-07-11 on the 198-sweep apartment scan*
   - [x] F4.0 Extract embedded per-sweep cubemap faces from E57 `images2D` (pye57 low-level API), keyed to sweep UUIDs, manifest.json *(added: source data ships panoramas inside the .e57)* ✅ *validated 2026-07-11: 198/198 sweeps with all 6 faces, Set A canonical transforms applied, 52 tests green*
-  - [ ] F4.1 WebGPUEngine async init, `powerPreference: high-performance`, WebGL2 fallback
-  - [ ] F4.2 Load active sweep cubemap as unlit skybox (Layer 1)
-  - [ ] F4.3 Sweep switching via `scan_positions` hotspot coordinates (simple jump; morphing comes in M7–9)
-  - [ ] F4.4 Face-orientation calibration: verify canonical Set A transforms (pre-seeded from the proven pipeline) against Babylon.js; apply any global adjustment at runtime only (seams visually correct in the viewer)
+  - [x] F4.1 WebGPUEngine async init, `powerPreference: high-performance`, WebGL2 fallback
+  - [x] F4.2 Load active sweep cubemap as unlit skybox (Layer 1)
+  - [x] F4.3 Sweep switching via `scan_positions` hotspot coordinates (simple jump via sweep panel + prev/next; morphing comes in M7–9)
+  - [x] F4.4 Face-orientation calibration ✅ **locked: `mirrorX · rotX-90`** on the cube texture reflection matrix (runtime-only, Layer 1 pixels untouched); pano camera single-code-path orientation (no 180° jump)
 - [ ] **F5. Automated pose-QA scoring (Gate 1)**
   - [ ] F5.1 Headless Blender (bpy): render Matterpak OBJ wireframe from each sweep pose
   - [ ] F5.2 Canny edge map of panorama vs projected mesh edges → edge-overlap score
@@ -208,3 +208,5 @@ Raw exports immutable in `/raw/{property_id}/{version}/`.
 | 2026-07-11 | **F4.1–F4.3 implemented** — tour viewer: manifest+poses join by sweep UUID, right-handed Y-up scene, unlit 6-face skybox (Layer 1), camera at pose translation with rotate-in-place controls, sweep panel + prev/next simple-jump switching, VRAM discipline on cubemap swaps, loading/error overlays. Placeholder scene removed. **Awaiting local validation, then F4.4 face-orientation calibration.** |
 | 2026-07-11 | Visual checks passed (seams, up/down, mirroring, continuity → Set A transforms hold in Babylon). Fixed two viewer bugs: cube texture cache collision (all sweeps shared rootUrl "" → same GPU texture; now keyed by sweep UUID) and orbit-style controls replaced with a true inside-out pano camera (FreeCamera + drag handler, pitch clamp, yaw/pitch continuity). **Awaiting re-validation.** |
 | 2026-07-11 | Sweep switching confirmed working. Remaining issue identified as the old pipeline's “global inversion handled in frontend”: cubemap content is scanner Z-up, viewer world is Y-up → yaw appears to spin around a sideways axis. Added **F4.4 calibration harness**: global reflection-matrix rotation on the cube texture (runtime-only, never baked), O key cycles 9 candidate orientations, M toggles mirror, state in HUD. Default candidate: rotX+90. **Awaiting calibration result to lock the matrix.** |
+| 2026-07-11 | Fixed 180° camera jump on first drag (RH TargetCamera path discrepancy → single `applyLook()` orientation code path). Calibration result: **`rotX-90 + mirror [2]`** → locked as constant `SKYBOX_ORIENTATION = mirrorX · rotX-90`, harness removed. **F4 block complete and validated** — full 198-sweep tour browsable with correct orientation, seams, and continuity. Next: **F5 automated pose-QA scoring (Gate 1)** — requires the Matterpak OBJ. |
+| 2026-07-11 | Matterpak confirmed complete for the two-story home (OBJ 43 MB + MTL + 222 textures + cloud.xyz 3.4 GB + color/ceiling plans → plans reserved for the M7–9 minimap). **F5 implemented** — `pose_qa.py` (prepare: per-face 90° cameras in the Matterport frame from poses.json via exact inverse conversion; score: Canny edge-overlap per face, 0.85 flag threshold, deterministic 10% spot-check, review composites) + `blender/render_edges.py` (headless Cycles 1-sample normalized-depth faces, `--limit` quick pass, `--obj-up`). Render orientation is **auto-calibrated** (8 ops × argmax on sample sweeps) instead of hand-tuned. **Awaiting local validation.** |
