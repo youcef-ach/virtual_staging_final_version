@@ -45,6 +45,13 @@ def main() -> None:
         default="Z",
         help="up axis of the OBJ file (MatterPak readme: right-handed Z-up)",
     )
+    parser.add_argument(
+        "--mode",
+        choices=["depth", "textured"],
+        default="depth",
+        help="depth: normalized depth for edge scoring; textured: unlit textured "
+        "render for ghosting verification (pose_qa verify)",
+    )
     args = parser.parse_args(_script_argv())
 
     bpy.ops.wm.read_factory_settings(use_empty=True)
@@ -57,23 +64,33 @@ def main() -> None:
     size = int(jobs.get("render_size", 512))
 
     scene = bpy.context.scene
-    scene.render.engine = "CYCLES"
-    scene.cycles.samples = 1
-    scene.cycles.use_denoising = False
-    scene.cycles.max_bounces = 0
     scene.render.resolution_x = size
     scene.render.resolution_y = size
     scene.render.image_settings.file_format = "PNG"
-    scene.render.image_settings.color_mode = "BW"
-    scene.render.image_settings.color_depth = "16"
-    scene.render.use_compositing = True
 
-    view_layer = scene.view_layers[0]
-    view_layer.use_pass_z = True
+    if args.mode == "textured":
+        # Unlit textured render (Workbench flat/texture). MatterPak textures
+        # derive from the panoramas, so a correct pose reproduces the photo.
+        scene.render.engine = "BLENDER_WORKBENCH"
+        scene.display.shading.light = "FLAT"
+        scene.display.shading.color_type = "TEXTURE"
+        scene.render.image_settings.color_mode = "RGB"
+        scene.render.image_settings.color_depth = "8"
+        scene.render.use_compositing = False
+    else:
+        scene.render.engine = "CYCLES"
+        scene.cycles.samples = 1
+        scene.cycles.use_denoising = False
+        scene.cycles.max_bounces = 0
+        scene.render.image_settings.color_mode = "BW"
+        scene.render.image_settings.color_depth = "16"
+        scene.render.use_compositing = True
+        view_layer = scene.view_layers[0]
+        view_layer.use_pass_z = True
 
     # Compositor: Depth -> Normalize -> output (per-image normalized depth;
     # only discontinuities matter for edge scoring, not metric values).
-    if hasattr(scene, "compositing_node_group"):
+    if args.mode == "depth" and hasattr(scene, "compositing_node_group"):
         # Blender 5.x compositor node group API.
         if scene.compositing_node_group is None:
             scene.compositing_node_group = bpy.data.node_groups.new(
@@ -88,7 +105,7 @@ def main() -> None:
         tree.interface.new_socket(name="Image", in_out="OUTPUT", socket_type="NodeSocketColor")
         tree.links.new(render_layers.outputs["Depth"], normalize.inputs[0])
         tree.links.new(normalize.outputs[0], group_output.inputs["Image"])
-    else:
+    elif args.mode == "depth":
         # Blender 4.x compositor API.
         scene.use_nodes = True
         tree = scene.node_tree

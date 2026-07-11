@@ -126,25 +126,54 @@ def face_camera_matrix(pose_mp: np.ndarray, face: str) -> np.ndarray:
     return matrix
 
 
+def _perturb_pose(pose_mp: np.ndarray, offset_cm: float, yaw_deg: float) -> np.ndarray:
+    """Deliberately corrupt a pose (sensitivity self-test for the QA metric)."""
+    perturbed = pose_mp.copy()
+    yaw = np.radians(yaw_deg)
+    rot_z = np.array(
+        [
+            [np.cos(yaw), -np.sin(yaw), 0.0],
+            [np.sin(yaw), np.cos(yaw), 0.0],
+            [0.0, 0.0, 1.0],
+        ]
+    )
+    perturbed[:3, :3] = rot_z @ perturbed[:3, :3]
+    perturbed[0, 3] += offset_cm / 100.0
+    return perturbed
+
+
 def prepare_render_jobs(
-    poses_path: Path, output_path: Path, render_size: int = DEFAULT_RENDER_SIZE
+    poses_path: Path,
+    output_path: Path,
+    render_size: int = DEFAULT_RENDER_SIZE,
+    perturb_index: int | None = None,
+    perturb_cm: float = 0.0,
+    perturb_deg: float = 0.0,
 ) -> int:
     """Emit render_jobs.json for the Blender renderer. Returns sweep count."""
     sweeps = read_poses_json(poses_path)
-    payload = {
-        "schema_version": QA_SCHEMA_VERSION,
-        "render_size": render_size,
-        "sweeps": [
+    sweep_entries = []
+    for s in sweeps:
+        pose_mp = convert_pose_yup_to_zup(s.pose_rt)
+        if perturb_index is not None and s.index == perturb_index:
+            pose_mp = _perturb_pose(pose_mp, perturb_cm, perturb_deg)
+            print(
+                f"PERTURBED sweep [{s.index:03d}] {s.sweep_uuid}: "
+                f"+{perturb_cm} cm, +{perturb_deg} deg yaw (sensitivity test)"
+            )
+        sweep_entries.append(
             {
                 "sweep_uuid": s.sweep_uuid,
                 "index": s.index,
                 "faces": {
-                    face: face_camera_matrix(convert_pose_yup_to_zup(s.pose_rt), face).tolist()
-                    for face in FACE_NAMES
+                    face: face_camera_matrix(pose_mp, face).tolist() for face in FACE_NAMES
                 },
             }
-            for s in sweeps
-        ],
+        )
+    payload = {
+        "schema_version": QA_SCHEMA_VERSION,
+        "render_size": render_size,
+        "sweeps": sweep_entries,
     }
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
@@ -433,6 +462,86 @@ def score_property(
     return results
 
 
+def verify_property(
+    pano_dir: Path,
+    render_dir: Path,
+    poses_path: Path,
+    calibration_path: Path,
+    output_dir: Path,
+    limit: int = 0,
+) -> None:
+    """Ghosting verification: [pano | 50/50 blend | abs-diff heatmap] per face.
+
+    Uses TEXTURED renders (render_edges.py --mode textured). A correct pose
+    makes the blend look sharp; pose error appears as double-vision ghosting
+    proportional to the error. Prints normalized cross-correlation per sweep.
+    """
+    calibration = json.loads(calibration_path.read_text(encoding="utf-8"))
+    sweeps = read_poses_json(poses_path)
+    rendered = [s for s in sweeps if (render_dir / s.sweep_uuid).is_dir()]
+    if limit > 0:
+        rendered = rendered[:limit]
+    if not rendered:
+        raise ValueError(f"no rendered sweeps found under {render_dir}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    for sweep in rendered:
+        rows: list[np.ndarray] = []
+        nccs: list[float] = []
+        for face in FACE_NAMES:
+            entry = calibration.get(face)
+            if not entry:
+                continue
+            pano = cv2.imread(
+                str(pano_dir / sweep.sweep_uuid / f"{face}.jpg"), cv2.IMREAD_COLOR
+            )
+            render = cv2.imread(
+                str(render_dir / sweep.sweep_uuid / f"{entry['render_face']}.png"),
+                cv2.IMREAD_COLOR,
+            )
+            if pano is None or render is None:
+                continue
+            oriented = np.ascontiguousarray(apply_orientation(render, str(entry["op"])))
+            if float(oriented.std()) < 2.0:
+                continue  # empty view (sky / outside the mesh)
+            pano_small = cv2.resize(
+                pano, (oriented.shape[1], oriented.shape[0]), interpolation=cv2.INTER_AREA
+            )
+            gray_pano = cv2.cvtColor(pano_small, cv2.COLOR_BGR2GRAY).astype(np.float64)
+            gray_render = cv2.cvtColor(oriented, cv2.COLOR_BGR2GRAY).astype(np.float64)
+            corr = np.corrcoef(gray_pano.ravel(), gray_render.ravel())[0, 1]
+            ncc = float(corr) if np.isfinite(corr) else 0.0
+            nccs.append(ncc)
+
+            blend = cv2.addWeighted(pano_small, 0.5, oriented, 0.5, 0)
+            diff = cv2.applyColorMap(
+                cv2.absdiff(
+                    gray_pano.astype(np.uint8), gray_render.astype(np.uint8)
+                ),
+                cv2.COLORMAP_JET,
+            )
+            row = np.hstack([pano_small, blend, diff])
+            cv2.putText(
+                row,
+                f"{face}  ncc={ncc:.2f}",
+                (8, 28),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.8,
+                (0, 255, 0),
+                2,
+            )
+            rows.append(row)
+        if rows:
+            out_path = output_dir / f"{sweep.index:03d}_{sweep.sweep_uuid}.jpg"
+            cv2.imwrite(
+                str(out_path), np.vstack(rows), [int(cv2.IMWRITE_JPEG_QUALITY), 90]
+            )
+            print(
+                f"[{sweep.index:03d}] {sweep.sweep_uuid}  "
+                f"mean ncc = {float(np.mean(nccs)):.3f}  -> {out_path.name}"
+            )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Gate 1: automated pose-QA scoring.")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -441,6 +550,17 @@ def main(argv: list[str] | None = None) -> int:
     p_prepare.add_argument("poses", type=Path, help="poses.json from the pose stage")
     p_prepare.add_argument("--output", "-o", type=Path, default=Path("render_jobs.json"))
     p_prepare.add_argument("--size", type=int, default=DEFAULT_RENDER_SIZE)
+    p_prepare.add_argument("--perturb-index", type=int, default=None, help="sweep index to corrupt (sensitivity test)")
+    p_prepare.add_argument("--perturb-cm", type=float, default=5.0)
+    p_prepare.add_argument("--perturb-deg", type=float, default=2.0)
+
+    p_verify = sub.add_parser("verify", help="ghosting verification against textured renders")
+    p_verify.add_argument("--panos", type=Path, required=True)
+    p_verify.add_argument("--renders", type=Path, required=True, help="textured renders dir")
+    p_verify.add_argument("--poses", type=Path, required=True)
+    p_verify.add_argument("--calibration", type=Path, required=True)
+    p_verify.add_argument("--output", "-o", type=Path, default=Path("qa_verify"))
+    p_verify.add_argument("--limit", type=int, default=0)
 
     p_score = sub.add_parser("score", help="score rendered faces against panoramas")
     p_score.add_argument("--panos", type=Path, required=True, help="extracted_cubemaps dir")
@@ -460,8 +580,26 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "prepare":
-        count = prepare_render_jobs(args.poses, args.output, args.size)
+        count = prepare_render_jobs(
+            args.poses,
+            args.output,
+            args.size,
+            perturb_index=args.perturb_index,
+            perturb_cm=args.perturb_cm,
+            perturb_deg=args.perturb_deg,
+        )
         print(f"{count} sweep(s) x {len(FACE_NAMES)} faces -> {args.output}")
+        return 0
+
+    if args.command == "verify":
+        verify_property(
+            args.panos,
+            args.renders,
+            args.poses,
+            args.calibration,
+            args.output,
+            limit=args.limit,
+        )
         return 0
 
     results = score_property(
