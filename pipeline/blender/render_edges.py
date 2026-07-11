@@ -77,6 +77,11 @@ def main() -> None:
         scene.render.image_settings.color_mode = "RGB"
         scene.render.image_settings.color_depth = "8"
         scene.render.use_compositing = False
+        # Photo comparison requires no artistic tone mapping (AgX/Filmic).
+        scene.view_settings.view_transform = "Standard"
+        scene.view_settings.look = "None"
+        scene.view_settings.exposure = 0.0
+        scene.view_settings.gamma = 1.0
     else:
         scene.render.engine = "CYCLES"
         scene.cycles.samples = 1
