@@ -9,7 +9,8 @@
 | npm | ≥ 10 | ships with Node 20 |
 | Git | any recent | |
 
-Optional (needed from Phase M4–6 onward): PDAL (system package), Blender ≥ 4.x (headless), Docker (PostgreSQL 16, Redis).
+Docker is required for the backend database (PostgreSQL 16 via `docker compose`).
+Optional until Phase M4–6: PDAL (system package), Blender ≥ 4.x (headless), Redis.
 
 ## Workflow
 

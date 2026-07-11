@@ -60,11 +60,11 @@ lightweight streaming web viewer.
   - [x] F1.2 Python project setup (Python 3.11, pyproject, deps: pye57, numpy, opencv, trimesh, pdal bindings)
   - [x] F1.3 Viewer project setup (TypeScript + Vite, Babylon.js 9.0, React 19 + Zustand shell)
   - [x] F1.4 Local dev environment docs (how to run everything on your machine)
-- [ ] **F2. E57 parser + pose extractor** *(first ticket)*
-  - [ ] F2.1 Read `.e57`: enumerate sweeps, extract per-sweep 4×4 pose matrices (pye57)
-  - [ ] F2.2 Apply the coordinate conversion (Z-up → Y-up) exactly once, at ingestion
-  - [ ] F2.3 Emit `poses.json` (sweep UUID → 4×4 matrix, runtime frame)
-  - [ ] F2.4 Unit tests: round-trip conversion, origin preservation invariant
+- [x] **F2. E57 parser + pose extractor** *(first ticket)* ✅ *validated 2026-07-11 on a real 10-sweep E57 (tripod heights on Y ≈ 1.4 m, GUIDs extracted)*
+  - [x] F2.1 Read `.e57`: enumerate sweeps, extract per-sweep 4×4 pose matrices (pye57)
+  - [x] F2.2 Apply the coordinate conversion (Z-up → Y-up) exactly once, at ingestion
+  - [x] F2.3 Emit `poses.json` (sweep UUID → 4×4 matrix, runtime frame)
+  - [x] F2.4 Unit tests: round-trip conversion, origin preservation invariant
 - [ ] **F3. Ingestion & versioning API**
   - [ ] F3.1 PostgreSQL 16 schema — initial migration (`organizations`, `users`, `properties`, `scan_versions`, `scan_positions`, `structural_planes`, `navigation_graph`, `catalog`, `staging_projects`, `qa_reviews`, `publish_states`)
   - [ ] F3.2 FastAPI upload endpoint: receive `.e57` + Matterpak + cubemaps, validate completeness + checksums
