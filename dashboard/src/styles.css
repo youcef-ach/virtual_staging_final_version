@@ -203,3 +203,32 @@ main h2 {
   color: #7d828a;
   font-size: 13px;
 }
+
+.margin {
+  font-size: 12px;
+  color: #9aa0a8;
+}
+
+.margin.bad {
+  color: #ff8a80;
+}
+
+.bad {
+  color: #ff8a80;
+}
+
+.sweep-summary {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 14px;
+  font-size: 13px;
+  font-family: ui-monospace, Consolas, monospace;
+  color: #b8bcc2;
+}
+
+.face-table th.row-label {
+  color: #7d828a;
+  font-weight: normal;
+  text-align: right;
+}
