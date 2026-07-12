@@ -8,6 +8,7 @@ dependencies = [
   "pye57>=0.4",
   "opencv-python-headless>=4.10",
   "trimesh>=4.5",
+  "shapely>=2.0",
 ]
 
 [project.optional-dependencies]
