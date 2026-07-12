@@ -315,8 +315,8 @@ def refine_planes(
             member_sweeps=sorted({p.sweep_index for p in cluster}),
             points=points,
         )
-        if cls in ("floor", "ceiling") and abs(float(normal[1])) > 1e-6:
-            plane.elevation_y = float(-d / float(normal[1]))
+        if cls in ("floor", "ceiling"):
+            plane.elevation_y = float(plane.centroid[1])
         planes.append(plane)
     return planes
 
@@ -383,9 +383,7 @@ def merge_refined_planes(planes: list[GlobalPlane]) -> list[GlobalPlane]:
         base.bbox_max = points.max(axis=0)
         base.member_sweeps = sorted({s for p in group for s in p.member_sweeps})
         base.elevation_y = (
-            float(-d / float(normal[1]))
-            if base.cls in ("floor", "ceiling") and abs(float(normal[1])) > 1e-6
-            else None
+            float(base.centroid[1]) if base.cls in ("floor", "ceiling") else None
         )
         merged.append(base)
     return merged
@@ -566,30 +564,40 @@ def render_review_images(
 ) -> None:
     """Orthographic 2D review renders (no 3D viewer needed).
 
-    planes_review_topdown.png: X-Z plan view — under-merged walls show as
-    parallel double lines in different colors.
-    planes_review_front.png: X-Y elevation view — floor/ceiling levels and
-    furniture surfaces are directly readable.
+    Combined views plus per-class top-downs: the walls-only render reads as
+    the floor plan (under-merge = parallel double lines in two colors); the
+    floors-only and ceilings-only renders expose level structure without
+    cross-class overdraw. Sweep positions are drawn as white crosses.
     """
-    pts_all: list[np.ndarray] = []
-    col_all: list[np.ndarray] = []
+    entries: list[tuple[str, np.ndarray, np.ndarray]] = []
     for i, plane in enumerate(planes):
         if plane.points is None:
             continue
         r, g, b = _palette(i)
-        pts_all.append(plane.points)
-        col_all.append(
-            np.tile([b * 255.0, g * 255.0, r * 255.0], (plane.points.shape[0], 1))
-        )
-    if residual.shape[0]:
-        pts_all.append(residual)
-        col_all.append(np.tile([90.0, 90.0, 90.0], (residual.shape[0], 1)))
-    if not pts_all:
-        return
-    pts = np.vstack(pts_all)
-    cols = np.vstack(col_all).astype(np.uint8)
+        entries.append((plane.cls, plane.points, np.array([b, g, r]) * 255.0))
+    gray = np.array([90.0, 90.0, 90.0])
 
-    def render(h_axis: int, v_axis: int, flip_v: bool, name: str) -> None:
+    def render(
+        classes: set[str] | None,
+        include_residual: bool,
+        h_axis: int,
+        v_axis: int,
+        flip_v: bool,
+        name: str,
+    ) -> None:
+        pts_all = [p for cls, p, _ in entries if classes is None or cls in classes]
+        col_all = [
+            np.tile(c, (p.shape[0], 1))
+            for cls, p, c in entries
+            if classes is None or cls in classes
+        ]
+        if include_residual and residual.shape[0]:
+            pts_all.append(residual)
+            col_all.append(np.tile(gray, (residual.shape[0], 1)))
+        if not pts_all:
+            return
+        pts = np.vstack(pts_all)
+        cols = np.vstack(col_all).astype(np.uint8)
         h, v = pts[:, h_axis], pts[:, v_axis]
         hmin, vmin = float(h.min()), float(v.min())
         extent = max(float(h.max()) - hmin, float(v.max()) - vmin, 1e-6)
@@ -613,8 +621,11 @@ def render_review_images(
                 )
         cv2.imwrite(str(out_dir / name), image)
 
-    render(0, 2, False, "planes_review_topdown.png")
-    render(0, 1, True, "planes_review_front.png")
+    render(None, True, 0, 2, False, "planes_review_topdown.png")
+    render(None, True, 0, 1, True, "planes_review_front.png")
+    render({"wall"}, False, 0, 2, False, "planes_review_topdown_walls.png")
+    render({"floor"}, False, 0, 2, False, "planes_review_topdown_floors.png")
+    render({"ceiling"}, False, 0, 2, False, "planes_review_topdown_ceilings.png")
 
 
 def parse_sweep_spec(spec: str | None, available: list[int]) -> list[int]:

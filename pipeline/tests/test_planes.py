@@ -173,6 +173,7 @@ def test_synthetic_room_end_to_end(tmp_path):
     assert (out / "planes_review.ply").exists()
     assert (out / "planes_review_topdown.png").exists()
     assert (out / "planes_review_front.png").exists()
+    assert (out / "planes_review_topdown_walls.png").exists()
 
 
 def _wall_with_points(pid, z0, z1, d_val=-2.0, seed=0):
