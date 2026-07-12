@@ -85,6 +85,9 @@ COVER_CELL_M = 0.25
 #: Matterport tripods stand ~1.4 m above the floor they rest on.
 TRIPOD_ABOVE_MIN_M = 1.0
 TRIPOD_ABOVE_MAX_M = 2.0
+#: A storey level needs at least this many sweeps standing on it (furniture
+#: tops collect at most a stray stair sweep).
+MIN_LEVEL_SWEEPS = 3
 #: Boundary rasterization.
 BOUNDARY_GRID_M = 0.05
 BOUNDARY_DP_EPS_PX = 1.5
@@ -431,39 +434,51 @@ def _has_ceiling_cover(floor: GlobalPlane, ceilings: list[GlobalPlane]) -> bool:
 def storey_floor_levels(
     planes: list[GlobalPlane], sweep_heights: list[float] | None = None
 ) -> list[float]:
-    """Storey floor elevations from INTERIOR floors only.
+    """Storey floor levels from elevation bins + tripod evidence (v3).
 
-    Interiority = union ceiling cover (_has_ceiling_cover) AND, when sweep
-    heights are supplied, tripod evidence: some sweep position stands
-    TRIPOD_ABOVE_MIN/MAX_M above the floor (scanners always stand on real
-    interior floors; outdoor terrain has no such sweep). The 30%-of-largest
-    area bar is computed over interior floors, so terrain can neither define
-    a level nor inflate the bar. Falls back to all floors when nothing passes
-    (e.g. ceiling-less synthetic data).
+    Up-facing planes are binned by elevation (0.15 m gap). A bin defines a
+    storey level when its biggest patch is room-sized (>= LEVEL_MIN_AREA_M2)
+    AND, when sweep heights are available, >= MIN_LEVEL_SWEEPS sweeps stand
+    TRIPOD_ABOVE_MIN/MAX_M above it -- scanners stand on real walkable levels
+    (including walk-out gardens / lower levels), while furniture tops collect
+    at most a stray stair sweep. Without sweep heights the biggest patch must
+    instead pass the ceiling-cover test. There is deliberately NO relative
+    area bar: the previous 30%-of-largest rule let one huge low-level patch
+    suppress legitimate but fragmented upper-storey floors (full-run bug).
     """
-    floors = [p for p in planes if p.cls == "floor"]
+    floors = [
+        p for p in planes if p.cls == "floor" and p.elevation_y is not None
+    ]
+    if not floors:
+        return []
     ceilings = [p for p in planes if p.cls == "ceiling"]
-
-    def tripod_ok(f: GlobalPlane) -> bool:
-        if not sweep_heights:
-            return True
-        e = f.elevation_y if f.elevation_y is not None else float(f.centroid[1])
-        return any(
-            TRIPOD_ABOVE_MIN_M <= h - e <= TRIPOD_ABOVE_MAX_M
-            for h in sweep_heights
-        )
-
-    interior = [
-        f for f in floors if tripod_ok(f) and _has_ceiling_cover(f, ceilings)
-    ]
-    candidates = interior if interior else floors
-    max_area = max((p.area_m2 for p in candidates), default=0.0)
-    area_min = max(LEVEL_MIN_AREA_M2, 0.3 * max_area)
-    return [
-        p.elevation_y
-        for p in candidates
-        if p.area_m2 >= area_min and p.elevation_y is not None
-    ]
+    ordered = sorted(floors, key=lambda p: p.elevation_y)
+    bins: list[list[GlobalPlane]] = [[ordered[0]]]
+    for f in ordered[1:]:
+        if f.elevation_y - bins[-1][-1].elevation_y <= 0.15:
+            bins[-1].append(f)
+        else:
+            bins.append([f])
+    levels: list[float] = []
+    for b in bins:
+        biggest = max(b, key=lambda p: p.area_m2)
+        if biggest.area_m2 < LEVEL_MIN_AREA_M2:
+            continue
+        if sweep_heights:
+            standing = sum(
+                1
+                for h in sweep_heights
+                if any(
+                    TRIPOD_ABOVE_MIN_M <= h - f.elevation_y <= TRIPOD_ABOVE_MAX_M
+                    for f in b
+                )
+            )
+            if standing < MIN_LEVEL_SWEEPS:
+                continue
+        elif not _has_ceiling_cover(biggest, ceilings):
+            continue
+        levels.extend(f.elevation_y for f in b)
+    return levels
 
 
 def reclassify_and_rename(
@@ -1043,8 +1058,9 @@ def inspect_planes(planes_path: Path, poses_path: Path | None = None) -> None:
 
     print(
         "\nlevel-candidate audit (floors >= "
-        f"{LEVEL_MIN_AREA_M2:.0f} m^2 after class reset; a level definer needs "
-        "tripod PASS + cover PASS + area >= the 30% bar):"
+        f"{LEVEL_MIN_AREA_M2:.0f} m^2 after class reset; v3 rule: an elevation "
+        f"bin is a storey level when its biggest patch is >= "
+        f"{LEVEL_MIN_AREA_M2:.0f} m^2 and >= {MIN_LEVEL_SWEEPS} sweeps stand on it):"
     )
     cand_floors = sorted(
         (s for s in shims if s.cls == "floor" and s.area_m2 >= LEVEL_MIN_AREA_M2),
