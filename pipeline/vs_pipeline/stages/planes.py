@@ -400,10 +400,12 @@ def reclassify_and_rename(planes: list[GlobalPlane]) -> None:
     ceiling level -> class "other". Ids are rebuilt afterwards (area order).
     """
     floors = [p for p in planes if p.cls == "floor"]
+    max_floor_area = max((p.area_m2 for p in floors), default=0.0)
+    level_area_min = max(LEVEL_MIN_AREA_M2, 0.3 * max_floor_area)
     levels = [
         p.elevation_y
         for p in floors
-        if p.area_m2 >= LEVEL_MIN_AREA_M2 and p.elevation_y is not None
+        if p.area_m2 >= level_area_min and p.elevation_y is not None
     ]
     if levels:
         for p in floors:
@@ -412,10 +414,12 @@ def reclassify_and_rename(planes: list[GlobalPlane]) -> None:
             if min(abs(p.elevation_y - lv) for lv in levels) > LEVEL_TOLERANCE_M:
                 p.cls = "surface"
     ceilings = [p for p in planes if p.cls == "ceiling"]
+    max_ceiling_area = max((p.area_m2 for p in ceilings), default=0.0)
+    clevel_area_min = max(LEVEL_MIN_AREA_M2, 0.3 * max_ceiling_area)
     clevels = [
         p.elevation_y
         for p in ceilings
-        if p.area_m2 >= LEVEL_MIN_AREA_M2 and p.elevation_y is not None
+        if p.area_m2 >= clevel_area_min and p.elevation_y is not None
     ]
     if clevels:
         for p in ceilings:
@@ -554,7 +558,11 @@ def _write_review_ply(
 
 
 def render_review_images(
-    planes: list[GlobalPlane], residual: np.ndarray, out_dir: Path, size_px: int = 1600
+    planes: list[GlobalPlane],
+    residual: np.ndarray,
+    out_dir: Path,
+    size_px: int = 1600,
+    positions: list[np.ndarray] | None = None,
 ) -> None:
     """Orthographic 2D review renders (no 3D viewer needed).
 
@@ -594,6 +602,15 @@ def render_review_images(
             iv = height - 1 - iv
         image = np.zeros((height, width, 3), dtype=np.uint8)
         image[iv, iu] = cols
+        for pos in positions or []:
+            mu = int((float(pos[h_axis]) - hmin) * scale) + 20
+            mv = int((float(pos[v_axis]) - vmin) * scale) + 20
+            if flip_v:
+                mv = height - 1 - mv
+            if 0 <= mu < width and 0 <= mv < height:
+                cv2.drawMarker(
+                    image, (mu, mv), (255, 255, 255), cv2.MARKER_CROSS, 14, 2
+                )
         cv2.imwrite(str(out_dir / name), image)
 
     render(0, 2, False, "planes_review_topdown.png")
@@ -616,9 +633,18 @@ def parse_sweep_spec(spec: str | None, available: list[int]) -> list[int]:
 
 
 def fit_property(
-    cache_dir: Path, out_dir: Path, sweep_spec: str | None = None
+    cache_dir: Path,
+    out_dir: Path,
+    sweep_spec: str | None = None,
+    poses_path: Path | None = None,
+    crop_margin: float | None = None,
 ) -> list[GlobalPlane]:
-    """Full G2 pass: propose -> cluster -> refine -> pair -> boundaries -> residuals."""
+    """Full G2 pass: propose -> cluster -> refine -> pair -> boundaries -> residuals.
+
+    With crop_margin set (requires poses_path), every sweep cloud is cropped
+    to the selected sweep positions' bbox + margin before proposing — the
+    one-room slice mode: geometry seen through windows/doorways is excluded.
+    """
     available = sorted(
         int(p.stem.split("_")[1]) for p in cache_dir.glob("scan_*.ply")
     )
@@ -627,12 +653,39 @@ def fit_property(
         raise ValueError(f"no cached sweeps selected under {cache_dir}")
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    positions: list[np.ndarray] = []
+    crop_min: np.ndarray | None = None
+    crop_max: np.ndarray | None = None
+    if poses_path is not None:
+        from vs_pipeline.stages.pose import read_poses_json
+
+        pose_by_index = {s.index: s.pose_rt[:3, 3] for s in read_poses_json(poses_path)}
+        positions = [pose_by_index[i] for i in indices if i in pose_by_index]
+    if crop_margin is not None:
+        if not positions:
+            raise ValueError("--crop-margin requires --poses (sweep positions)")
+        pos = np.vstack(positions)
+        pad = np.array([crop_margin, 3.0, crop_margin])
+        crop_min = pos.min(axis=0) - pad
+        crop_max = pos.max(axis=0) + pad
+        print(
+            "room crop enabled: "
+            f"{np.round(crop_min, 2).tolist()} .. {np.round(crop_max, 2).tolist()}"
+        )
+
     print(f"proposing planes on {len(indices)} sweep(s)…")
     proposals: list[PlaneProposal] = []
     coarse_parts: list[np.ndarray] = []
     for index in indices:
         started = time.perf_counter()
         cloud = _load_sweep_cloud(cache_dir, index)
+        if crop_min is not None and crop_max is not None:
+            import open3d as o3d  # local import
+
+            cloud = cloud.crop(o3d.geometry.AxisAlignedBoundingBox(crop_min, crop_max))
+            if len(cloud.points) == 0:
+                print(f"  [{index:03d}] empty after crop -> skip")
+                continue
         props = propose_sweep_planes(cloud, index)
         proposals.extend(props)
         coarse_parts.append(
@@ -709,7 +762,7 @@ def fit_property(
         encoding="utf-8",
     )
     _write_review_ply(planes, residual_points, out_dir / "planes_review.ply")
-    render_review_images(planes, residual_points, out_dir)
+    render_review_images(planes, residual_points, out_dir, positions=positions)
 
     print(f"\n{len(planes)} global plane(s):")
     for p in planes:
@@ -743,11 +796,30 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help='sweep selection, e.g. "30-40" or "3,7,30-40" (default: all cached)',
     )
+    p_fit.add_argument(
+        "--poses",
+        type=Path,
+        default=None,
+        help="poses.json (enables sweep markers in renders and --crop-margin)",
+    )
+    p_fit.add_argument(
+        "--crop-margin",
+        type=float,
+        default=None,
+        help="one-room slice mode: crop clouds to the selected sweep positions' "
+        "bbox + margin (m); requires --poses",
+    )
     args = parser.parse_args(argv)
 
     if not args.cache.is_dir():
         parser.error(f"cache directory not found: {args.cache}")
-    fit_property(args.cache, args.output, args.sweeps)
+    fit_property(
+        args.cache,
+        args.output,
+        args.sweeps,
+        poses_path=args.poses,
+        crop_margin=args.crop_margin,
+    )
     return 0
 
 

@@ -234,3 +234,14 @@ def test_reclassify_tabletop_as_surface():
     assert floor.cls == "floor"
     assert table.cls == "surface"
     assert table.plane_id.startswith("surface_")
+
+
+def test_large_furniture_cannot_define_a_storey_level():
+    """A 10 m^2 platform at +0.46 m must not shield itself from reclassification."""
+    from vs_pipeline.stages.planes import reclassify_and_rename
+
+    floor = _horizontal("floor_00", 40.0, 0.0)
+    platform = _horizontal("floor_01", 10.0, 0.46)
+    reclassify_and_rename([floor, platform])
+    assert floor.cls == "floor"
+    assert platform.cls == "surface"
