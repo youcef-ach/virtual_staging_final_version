@@ -791,6 +791,121 @@ def fit_property(
     return planes
 
 
+def inspect_planes(planes_path: Path) -> None:
+    """Read-only diagnostics on an existing structural_planes.json (no refit).
+
+    Prints: per-class counts; every horizontal plane sorted by elevation;
+    elevation clusters (storey candidates) with per-cluster areas; the exact
+    storey levels the reclassifier used (reconstructed from the same
+    deterministic rule); and suspicious room-sized `surface` / down-facing
+    `other` planes that may be true floors/ceilings demoted by a storey
+    anchor polluted with outdoor terrain.
+    """
+    data = json.loads(planes_path.read_text(encoding="utf-8"))
+    planes: list[dict[str, Any]] = data["planes"]
+
+    counts: dict[str, int] = {}
+    for p in planes:
+        counts[p["class"]] = counts.get(p["class"], 0) + 1
+    print(
+        f"{data['plane_count']} plane(s): "
+        + ", ".join(f"{v} {k}" for k, v in sorted(counts.items()))
+    )
+
+    horizontals: list[tuple[float, str, dict[str, Any]]] = []
+    for p in planes:
+        ny = float(p["coefficients"][1])
+        if abs(ny) > HORIZONTAL_NY:
+            horizontals.append(
+                (float(p["centroid"][1]), "up" if ny > 0 else "down", p)
+            )
+    horizontals.sort(key=lambda t: -t[0])
+
+    print("\nhorizontal planes (top to bottom):")
+    print(
+        f"  {'y (m)':>8}  {'faces':<5}  {'class':<8}  {'plane_id':<14}"
+        f"  {'area m^2':>9}  sweeps"
+    )
+    for y, faces, p in horizontals:
+        print(
+            f"  {y:+8.3f}  {faces:<5}  {p['class']:<8}  {p['plane_id']:<14}"
+            f"  {p['area_m2']:>9.2f}  {len(p['member_sweeps']):>3}"
+        )
+
+    print("\nelevation clusters (a gap > 0.15 m starts a new cluster):")
+    ordered = sorted(horizontals, key=lambda t: t[0])
+    groups: list[list[tuple[float, str, dict[str, Any]]]] = []
+    for item in ordered:
+        if groups and item[0] - groups[-1][-1][0] <= 0.15:
+            groups[-1].append(item)
+        else:
+            groups.append([item])
+    for group in groups:
+        ys = [g[0] for g in group]
+        up_area = sum(g[2]["area_m2"] for g in group if g[1] == "up")
+        down_area = sum(g[2]["area_m2"] for g in group if g[1] == "down")
+        biggest = max(group, key=lambda g: g[2]["area_m2"])[2]
+        print(
+            f"  y {min(ys):+7.3f} .. {max(ys):+7.3f}  ({len(group):>3} planes)"
+            f"  up {up_area:8.2f} m^2  down {down_area:8.2f} m^2"
+            f"  biggest: {biggest['plane_id']} ({biggest['area_m2']:.2f} m^2)"
+        )
+
+    floors = [p for p in planes if p["class"] == "floor"]
+    max_floor_area = max((p["area_m2"] for p in floors), default=0.0)
+    level_area_min = max(LEVEL_MIN_AREA_M2, 0.3 * max_floor_area)
+    print(
+        f"\nstorey FLOOR levels used by the reclassifier "
+        f"(floors with area >= {level_area_min:.1f} m^2; any up-facing plane "
+        f"further than {LEVEL_TOLERANCE_M} m above every level was demoted to "
+        f"'surface'):"
+    )
+    for p in sorted(floors, key=lambda q: -q["area_m2"]):
+        if p["area_m2"] >= level_area_min and p["elevation_y"] is not None:
+            print(
+                f"  y = {p['elevation_y']:+7.3f}  {p['plane_id']:<14}"
+                f"  {p['area_m2']:.2f} m^2"
+            )
+
+    ceilings = [p for p in planes if p["class"] == "ceiling"]
+    max_ceiling_area = max((p["area_m2"] for p in ceilings), default=0.0)
+    clevel_area_min = max(LEVEL_MIN_AREA_M2, 0.3 * max_ceiling_area)
+    print(f"\nstorey CEILING levels (ceilings with area >= {clevel_area_min:.1f} m^2):")
+    for p in sorted(ceilings, key=lambda q: -q["area_m2"]):
+        if p["area_m2"] >= clevel_area_min and p["elevation_y"] is not None:
+            print(
+                f"  y = {p['elevation_y']:+7.3f}  {p['plane_id']:<14}"
+                f"  {p['area_m2']:.2f} m^2"
+            )
+
+    big_surfaces = [
+        p
+        for p in planes
+        if p["class"] == "surface" and p["area_m2"] >= LEVEL_MIN_AREA_M2
+    ]
+    big_down_other = [
+        p
+        for p in planes
+        if p["class"] == "other"
+        and p["area_m2"] >= LEVEL_MIN_AREA_M2
+        and float(p["coefficients"][1]) < -HORIZONTAL_NY
+    ]
+    print("\nsuspicious demotions (room-sized planes classed as furniture/other):")
+    if not big_surfaces and not big_down_other:
+        print("  none - no surface/other plane reaches room scale.")
+    for p in big_surfaces:
+        print(
+            f"  SURFACE {p['plane_id']:<14} y = {float(p['centroid'][1]):+7.3f}"
+            f"  {p['area_m2']:.2f} m^2  <- possible true floor demoted by a bad"
+            " storey anchor"
+        )
+    for p in big_down_other:
+        print(
+            f"  OTHER   {p['plane_id']:<14} y = {float(p['centroid'][1]):+7.3f}"
+            f"  {p['area_m2']:.2f} m^2  <- possible true ceiling demoted"
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Stage 5 (G2): plane fitting & boundary extraction."
@@ -820,7 +935,19 @@ def main(argv: list[str] | None = None) -> int:
         help="one-room slice mode: crop clouds to the selected sweep positions' "
         "bbox + margin (m); requires --poses",
     )
+    p_inspect = sub.add_parser(
+        "inspect", help="read-only diagnostics on an existing structural_planes.json"
+    )
+    p_inspect.add_argument(
+        "--planes", type=Path, required=True, help="path to structural_planes.json"
+    )
     args = parser.parse_args(argv)
+
+    if args.command == "inspect":
+        if not args.planes.is_file():
+            parser.error(f"planes file not found: {args.planes}")
+        inspect_planes(args.planes)
+        return 0
 
     if not args.cache.is_dir():
         parser.error(f"cache directory not found: {args.cache}")
