@@ -171,3 +171,66 @@ def test_synthetic_room_end_to_end(tmp_path):
     )
     assert residuals["cluster_count"] >= 1
     assert (out / "planes_review.ply").exists()
+    assert (out / "planes_review_topdown.png").exists()
+    assert (out / "planes_review_front.png").exists()
+
+
+def _wall_with_points(pid, z0, z1, d_val=-2.0, seed=0):
+    rng = np.random.default_rng(seed)
+    count = 800
+    ys = rng.uniform(0.0, 2.5, count)
+    zs = rng.uniform(z0, z1, count)
+    xs = np.full(count, -d_val) + rng.normal(scale=0.002, size=count)
+    pts = np.column_stack([xs, ys, zs])
+    return GlobalPlane(
+        plane_id=pid,
+        cls="wall",
+        normal=np.array([1.0, 0.0, 0.0]),
+        d=float(d_val),
+        inlier_count=count,
+        area_m2=(z1 - z0) * 2.5,
+        centroid=pts.mean(axis=0),
+        bbox_min=pts.min(axis=0),
+        bbox_max=pts.max(axis=0),
+        member_sweeps=[0],
+        points=pts,
+    )
+
+
+def test_merge_refined_combines_duplicates_keeps_distant():
+    from vs_pipeline.stages.planes import merge_refined_planes
+
+    a = _wall_with_points("wall_00", 0.0, 2.0, seed=1)
+    b = _wall_with_points("wall_01", 1.8, 4.0, seed=2)  # same wall, overlapping
+    far = _wall_with_points("wall_02", 10.0, 12.0, seed=3)  # bleeding guard
+    merged = merge_refined_planes([a, b, far])
+    assert len(merged) == 2
+    big = max(merged, key=lambda p: p.inlier_count)
+    assert big.inlier_count == 1600
+
+
+def _horizontal(pid, area, y):
+    return GlobalPlane(
+        plane_id=pid,
+        cls="floor",
+        normal=np.array([0.0, 1.0, 0.0]),
+        d=float(-y),
+        inlier_count=1000,
+        area_m2=float(area),
+        centroid=np.array([2.0, y, 2.0]),
+        bbox_min=np.array([0.0, y, 0.0]),
+        bbox_max=np.array([4.0, y, 4.0]),
+        member_sweeps=[0],
+        elevation_y=float(y),
+    )
+
+
+def test_reclassify_tabletop_as_surface():
+    from vs_pipeline.stages.planes import reclassify_and_rename
+
+    floor = _horizontal("floor_00", 20.0, 0.0)
+    table = _horizontal("floor_01", 1.5, 0.75)
+    reclassify_and_rename([floor, table])
+    assert floor.cls == "floor"
+    assert table.cls == "surface"
+    assert table.plane_id.startswith("surface_")

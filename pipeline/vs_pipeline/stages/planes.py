@@ -67,6 +67,13 @@ REFINE_MAX_POINTS_PER_PLANE = 150_000
 #: Wall pairing (opposing normals).
 WALL_PAIR_MAX_GAP_M = 0.3
 WALL_PAIR_MIN_OPPOSE = 0.985
+#: Second merge pass on refined coefficients (accurate after the 15 mm refit).
+REFINED_MERGE_MAX_ANGLE_DEG = 3.0
+REFINED_MERGE_MAX_OFFSET_M = 0.025
+#: Storey-level detection: large horizontals define floor/ceiling levels;
+#: up-facing planes further than this above a floor level are furniture tops.
+LEVEL_MIN_AREA_M2 = 8.0
+LEVEL_TOLERANCE_M = 0.25
 #: Boundary rasterization.
 BOUNDARY_GRID_M = 0.05
 BOUNDARY_DP_EPS_PX = 1.5
@@ -314,6 +321,115 @@ def refine_planes(
     return planes
 
 
+def merge_refined_planes(planes: list[GlobalPlane]) -> list[GlobalPlane]:
+    """Second merge pass on refined (accurate) coefficients.
+
+    Proposal-level merging is deliberately conservative because raw per-sweep
+    RANSAC estimates wobble (especially in glass-heavy rooms), which
+    under-merges. After the 15 mm refit the coefficients are trustworthy, so
+    compatible planes merge here — with the same padded-bbox bleeding guard.
+    """
+    n = len(planes)
+    parent = list(range(n))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    cos_max = np.cos(np.radians(REFINED_MERGE_MAX_ANGLE_DEG))
+    for i in range(n):
+        for j in range(i + 1, n):
+            a, b = planes[i], planes[j]
+            if float(a.normal @ b.normal) < cos_max:
+                continue
+            if abs(a.d - b.d) > REFINED_MERGE_MAX_OFFSET_M:
+                continue
+            if not _bboxes_overlap(
+                a.bbox_min, a.bbox_max, b.bbox_min, b.bbox_max, MERGE_BBOX_PAD_M
+            ):
+                continue
+            ri, rj = find(i), find(j)
+            if ri != rj:
+                parent[rj] = ri
+
+    rng = np.random.default_rng(1)
+    groups: dict[int, list[GlobalPlane]] = {}
+    for i in range(n):
+        groups.setdefault(find(i), []).append(planes[i])
+
+    merged: list[GlobalPlane] = []
+    for group in groups.values():
+        if len(group) == 1:
+            merged.append(group[0])
+            continue
+        points = np.vstack([p.points for p in group if p.points is not None])
+        if points.shape[0] > REFINE_MAX_POINTS_PER_PLANE:
+            points = points[
+                rng.choice(points.shape[0], REFINE_MAX_POINTS_PER_PLANE, replace=False)
+            ]
+        normal, d = fit_plane_lsq(points)
+        navg = np.sum([p.normal * p.inlier_count for p in group], axis=0)
+        if float(normal @ navg) < 0.0:
+            normal, d = -normal, -d
+        base = max(group, key=lambda p: p.inlier_count)
+        base.normal, base.d = normal, d
+        base.cls = classify_normal(normal)
+        base.points = points
+        base.inlier_count = int(sum(p.inlier_count for p in group))
+        base.centroid = points.mean(axis=0)
+        base.bbox_min = points.min(axis=0)
+        base.bbox_max = points.max(axis=0)
+        base.member_sweeps = sorted({s for p in group for s in p.member_sweeps})
+        base.elevation_y = (
+            float(-d / float(normal[1]))
+            if base.cls in ("floor", "ceiling") and abs(float(normal[1])) > 1e-6
+            else None
+        )
+        merged.append(base)
+    return merged
+
+
+def reclassify_and_rename(planes: list[GlobalPlane]) -> None:
+    """Storey-aware reclassification, then stable ids.
+
+    Large horizontals define the storey floor/ceiling levels. Up-facing
+    planes further than LEVEL_TOLERANCE_M above every floor level are
+    furniture tops -> class "surface"; down-facing planes far below every
+    ceiling level -> class "other". Ids are rebuilt afterwards (area order).
+    """
+    floors = [p for p in planes if p.cls == "floor"]
+    levels = [
+        p.elevation_y
+        for p in floors
+        if p.area_m2 >= LEVEL_MIN_AREA_M2 and p.elevation_y is not None
+    ]
+    if levels:
+        for p in floors:
+            if p.elevation_y is None:
+                continue
+            if min(abs(p.elevation_y - lv) for lv in levels) > LEVEL_TOLERANCE_M:
+                p.cls = "surface"
+    ceilings = [p for p in planes if p.cls == "ceiling"]
+    clevels = [
+        p.elevation_y
+        for p in ceilings
+        if p.area_m2 >= LEVEL_MIN_AREA_M2 and p.elevation_y is not None
+    ]
+    if clevels:
+        for p in ceilings:
+            if p.elevation_y is None:
+                continue
+            if min(abs(p.elevation_y - lv) for lv in clevels) > LEVEL_TOLERANCE_M:
+                p.cls = "other"
+    counters: dict[str, int] = {}
+    for p in sorted(planes, key=lambda q: -q.area_m2):
+        k = counters.get(p.cls, 0)
+        counters[p.cls] = k + 1
+        p.plane_id = f"{p.cls}_{k:02d}"
+
+
 def pair_walls(planes: list[GlobalPlane]) -> None:
     """Group parallel, opposing-normal planes < 300 mm apart into wall entities."""
     walls = [p for p in planes if p.cls == "wall"]
@@ -437,6 +553,53 @@ def _write_review_ply(
     o3d.io.write_point_cloud(str(out_path), cloud, write_ascii=False, compressed=True)
 
 
+def render_review_images(
+    planes: list[GlobalPlane], residual: np.ndarray, out_dir: Path, size_px: int = 1600
+) -> None:
+    """Orthographic 2D review renders (no 3D viewer needed).
+
+    planes_review_topdown.png: X-Z plan view — under-merged walls show as
+    parallel double lines in different colors.
+    planes_review_front.png: X-Y elevation view — floor/ceiling levels and
+    furniture surfaces are directly readable.
+    """
+    pts_all: list[np.ndarray] = []
+    col_all: list[np.ndarray] = []
+    for i, plane in enumerate(planes):
+        if plane.points is None:
+            continue
+        r, g, b = _palette(i)
+        pts_all.append(plane.points)
+        col_all.append(
+            np.tile([b * 255.0, g * 255.0, r * 255.0], (plane.points.shape[0], 1))
+        )
+    if residual.shape[0]:
+        pts_all.append(residual)
+        col_all.append(np.tile([90.0, 90.0, 90.0], (residual.shape[0], 1)))
+    if not pts_all:
+        return
+    pts = np.vstack(pts_all)
+    cols = np.vstack(col_all).astype(np.uint8)
+
+    def render(h_axis: int, v_axis: int, flip_v: bool, name: str) -> None:
+        h, v = pts[:, h_axis], pts[:, v_axis]
+        hmin, vmin = float(h.min()), float(v.min())
+        extent = max(float(h.max()) - hmin, float(v.max()) - vmin, 1e-6)
+        scale = (size_px - 40) / extent
+        width = int((float(h.max()) - hmin) * scale) + 40
+        height = int((float(v.max()) - vmin) * scale) + 40
+        iu = ((h - hmin) * scale).astype(np.int32) + 20
+        iv = ((v - vmin) * scale).astype(np.int32) + 20
+        if flip_v:
+            iv = height - 1 - iv
+        image = np.zeros((height, width, 3), dtype=np.uint8)
+        image[iv, iu] = cols
+        cv2.imwrite(str(out_dir / name), image)
+
+    render(0, 2, False, "planes_review_topdown.png")
+    render(0, 1, True, "planes_review_front.png")
+
+
 def parse_sweep_spec(spec: str | None, available: list[int]) -> list[int]:
     """Parse "3", "3,7", "30-40", "3,30-40" against available indices."""
     if not spec:
@@ -484,9 +647,12 @@ def fit_property(
     print(f"{len(proposals)} proposal(s) -> {len(clusters)} global plane cluster(s)")
 
     planes = refine_planes(clusters, cache_dir)
-    pair_walls(planes)
+    planes = merge_refined_planes(planes)
+    print(f"second-pass merge on refined coefficients -> {len(planes)} plane(s)")
     for plane in planes:
         extract_boundary(plane)
+    reclassify_and_rename(planes)
+    pair_walls(planes)
     planes.sort(key=lambda p: -p.area_m2)
 
     coarse_points = np.vstack(coarse_parts)
@@ -543,6 +709,7 @@ def fit_property(
         encoding="utf-8",
     )
     _write_review_ply(planes, residual_points, out_dir / "planes_review.ply")
+    render_review_images(planes, residual_points, out_dir)
 
     print(f"\n{len(planes)} global plane(s):")
     for p in planes:
