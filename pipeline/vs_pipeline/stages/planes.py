@@ -74,12 +74,17 @@ REFINED_MERGE_MAX_OFFSET_M = 0.025
 #: up-facing planes further than this above a floor level are furniture tops.
 LEVEL_MIN_AREA_M2 = 8.0
 LEVEL_TOLERANCE_M = 0.25
-#: Storey-level interiority: a level-defining floor must have ceiling cover
-#: (>= this fraction of its plan-view bbox) at a plausible storey height above
-#: -- excludes outdoor terrain on facade-inclusive scans.
-INTERIOR_COVER_MIN = 0.5
+#: Storey-level interiority: a level-defining floor needs (a) plan-view UNION
+#: ceiling cover >= this fraction of its bbox at a plausible height above and
+#: (b) tripod evidence when sweep heights are available -- excludes outdoor
+#: terrain on facade-inclusive scans.
+INTERIOR_COVER_MIN = 0.6
 CEILING_ABOVE_MIN_M = 1.8
 CEILING_ABOVE_MAX_M = 4.5
+COVER_CELL_M = 0.25
+#: Matterport tripods stand ~1.4 m above the floor they rest on.
+TRIPOD_ABOVE_MIN_M = 1.0
+TRIPOD_ABOVE_MAX_M = 2.0
 #: Boundary rasterization.
 BOUNDARY_GRID_M = 0.05
 BOUNDARY_DP_EPS_PX = 1.5
@@ -396,39 +401,56 @@ def merge_refined_planes(planes: list[GlobalPlane]) -> list[GlobalPlane]:
 
 
 def _has_ceiling_cover(floor: GlobalPlane, ceilings: list[GlobalPlane]) -> bool:
-    """Interiority test: ceilings CEILING_ABOVE_MIN/MAX_M above must cover at
-    least INTERIOR_COVER_MIN of the floor's plan-view bbox. Outdoor terrain on
-    facade-inclusive scans fails this and cannot define storey levels."""
-    fw = max(float(floor.bbox_max[0] - floor.bbox_min[0]), 1e-6)
-    fd = max(float(floor.bbox_max[2] - floor.bbox_min[2]), 1e-6)
-    cover = 0.0
+    """Interiority test: the plan-view UNION of ceilings CEILING_ABOVE_MIN/MAX_M
+    above must cover >= INTERIOR_COVER_MIN of the floor's bbox. Union on a
+    coarse grid -- summing per-ceiling intersections double-counts overlapping
+    ceiling patches, which is exactly how outdoor terrain slipped through v1."""
+    fx0, fz0 = float(floor.bbox_min[0]), float(floor.bbox_min[2])
+    fx1, fz1 = float(floor.bbox_max[0]), float(floor.bbox_max[2])
+    nx = max(int(np.ceil((fx1 - fx0) / COVER_CELL_M)), 1)
+    nz = max(int(np.ceil((fz1 - fz0) / COVER_CELL_M)), 1)
+    covered = np.zeros((nx, nz), dtype=bool)
     for c in ceilings:
         dy = float(c.centroid[1]) - float(floor.centroid[1])
         if not (CEILING_ABOVE_MIN_M <= dy <= CEILING_ABOVE_MAX_M):
             continue
-        dx = min(float(floor.bbox_max[0]), float(c.bbox_max[0])) - max(
-            float(floor.bbox_min[0]), float(c.bbox_min[0])
-        )
-        dz = min(float(floor.bbox_max[2]), float(c.bbox_max[2])) - max(
-            float(floor.bbox_min[2]), float(c.bbox_min[2])
-        )
-        if dx > 0.0 and dz > 0.0:
-            cover += dx * dz
-    return cover >= INTERIOR_COVER_MIN * fw * fd
+        ix0 = max(int(np.floor((float(c.bbox_min[0]) - fx0) / COVER_CELL_M)), 0)
+        iz0 = max(int(np.floor((float(c.bbox_min[2]) - fz0) / COVER_CELL_M)), 0)
+        ix1 = min(int(np.ceil((float(c.bbox_max[0]) - fx0) / COVER_CELL_M)), nx)
+        iz1 = min(int(np.ceil((float(c.bbox_max[2]) - fz0) / COVER_CELL_M)), nz)
+        if ix1 > ix0 and iz1 > iz0:
+            covered[ix0:ix1, iz0:iz1] = True
+    return float(covered.mean()) >= INTERIOR_COVER_MIN
 
 
-def storey_floor_levels(planes: list[GlobalPlane]) -> list[float]:
+def storey_floor_levels(
+    planes: list[GlobalPlane], sweep_heights: list[float] | None = None
+) -> list[float]:
     """Storey floor elevations from INTERIOR floors only.
 
-    The 30%-of-largest area bar is computed over interior floors, so outdoor
-    terrain can neither define a level nor inflate the bar (the full-run bug:
-    87 m^2 of terrain pushed the bar to 26 m^2 and the fragmented 10-13 m^2
-    second-storey room floors were demoted). Falls back to all floors when
-    nothing passes the interiority test (e.g. ceiling-less synthetic data).
+    Interiority = union ceiling cover (_has_ceiling_cover) AND, when sweep
+    heights are supplied, tripod evidence: some sweep position stands
+    TRIPOD_ABOVE_MIN/MAX_M above the floor (scanners always stand on real
+    interior floors; outdoor terrain has no such sweep). The 30%-of-largest
+    area bar is computed over interior floors, so terrain can neither define
+    a level nor inflate the bar. Falls back to all floors when nothing passes
+    (e.g. ceiling-less synthetic data).
     """
     floors = [p for p in planes if p.cls == "floor"]
     ceilings = [p for p in planes if p.cls == "ceiling"]
-    interior = [f for f in floors if _has_ceiling_cover(f, ceilings)]
+
+    def tripod_ok(f: GlobalPlane) -> bool:
+        if not sweep_heights:
+            return True
+        e = f.elevation_y if f.elevation_y is not None else float(f.centroid[1])
+        return any(
+            TRIPOD_ABOVE_MIN_M <= h - e <= TRIPOD_ABOVE_MAX_M
+            for h in sweep_heights
+        )
+
+    interior = [
+        f for f in floors if tripod_ok(f) and _has_ceiling_cover(f, ceilings)
+    ]
     candidates = interior if interior else floors
     max_area = max((p.area_m2 for p in candidates), default=0.0)
     area_min = max(LEVEL_MIN_AREA_M2, 0.3 * max_area)
@@ -439,7 +461,9 @@ def storey_floor_levels(planes: list[GlobalPlane]) -> list[float]:
     ]
 
 
-def reclassify_and_rename(planes: list[GlobalPlane]) -> None:
+def reclassify_and_rename(
+    planes: list[GlobalPlane], sweep_heights: list[float] | None = None
+) -> None:
     """Storey-aware reclassification, then stable ids.
 
     Interior floors define the storey levels (storey_floor_levels). Up-facing
@@ -448,7 +472,7 @@ def reclassify_and_rename(planes: list[GlobalPlane]) -> None:
     (outdoor terrain). Down-facing planes far from every ceiling level ->
     "other". Ids are rebuilt afterwards (area order).
     """
-    levels = storey_floor_levels(planes)
+    levels = storey_floor_levels(planes, sweep_heights)
     if levels:
         lowest = min(levels)
         for p in [q for q in planes if q.cls == "floor"]:
@@ -760,7 +784,10 @@ def fit_property(
     print(f"second-pass merge on refined coefficients -> {len(planes)} plane(s)")
     for plane in planes:
         extract_boundary(plane)
-    reclassify_and_rename(planes)
+    reclassify_and_rename(
+        planes,
+        sweep_heights=[float(p[1]) for p in positions] if positions else None,
+    )
     pair_walls(planes)
     planes.sort(key=lambda p: -p.area_m2)
 
@@ -862,7 +889,16 @@ def _planes_from_json(data: dict[str, Any]) -> list[GlobalPlane]:
     return shims
 
 
-def reclassify_planes_json(planes_path: Path) -> None:
+def _sweep_heights_from_poses(poses_path: Path | None) -> list[float] | None:
+    """Sweep-position Y values from poses.json (tripod evidence), or None."""
+    if poses_path is None:
+        return None
+    from vs_pipeline.stages.pose import read_poses_json
+
+    return [float(s.pose_rt[1, 3]) for s in read_poses_json(poses_path)]
+
+
+def reclassify_planes_json(planes_path: Path, poses_path: Path | None = None) -> None:
     """Re-apply storey reclassification to an existing structural_planes.json.
 
     Classes are reset from the stored normals first (undoing any prior
@@ -878,9 +914,12 @@ def reclassify_planes_json(planes_path: Path) -> None:
         s.elevation_y = (
             float(s.centroid[1]) if s.cls in ("floor", "ceiling") else None
         )
-    reclassify_and_rename(shims)
+    heights = _sweep_heights_from_poses(poses_path)
+    reclassify_and_rename(shims, sweep_heights=heights)
 
-    levels = sorted(storey_floor_levels(shims))
+    levels = sorted(storey_floor_levels(shims, heights))
+    if heights is None:
+        print("NOTE: no --poses given -> tripod evidence skipped (less robust)")
     print("storey floor levels: " + ", ".join(f"{lv:+.3f}" for lv in levels))
     print("class changes:")
     changes = 0
@@ -907,7 +946,7 @@ def reclassify_planes_json(planes_path: Path) -> None:
     print(f"saved -> {planes_path}")
 
 
-def inspect_planes(planes_path: Path) -> None:
+def inspect_planes(planes_path: Path, poses_path: Path | None = None) -> None:
     """Read-only diagnostics on an existing structural_planes.json (no refit).
 
     Prints: per-class counts; every horizontal plane sorted by elevation;
@@ -973,10 +1012,10 @@ def inspect_planes(planes_path: Path) -> None:
         s.elevation_y = (
             float(s.centroid[1]) if s.cls in ("floor", "ceiling") else None
         )
-    levels = sorted(storey_floor_levels(shims))
+    levels = sorted(storey_floor_levels(shims, _sweep_heights_from_poses(poses_path)))
     print(
         "\nstorey FLOOR levels under the current interiority-aware rule "
-        "(classes reset from normals first):"
+        "(classes reset from normals first; pass --poses for tripod evidence):"
     )
     for lv in levels:
         print(f"  y = {lv:+7.3f}")
@@ -1055,6 +1094,9 @@ def main(argv: list[str] | None = None) -> int:
     p_inspect.add_argument(
         "--planes", type=Path, required=True, help="path to structural_planes.json"
     )
+    p_inspect.add_argument(
+        "--poses", type=Path, default=None, help="poses.json (tripod evidence)"
+    )
     p_reclass = sub.add_parser(
         "reclassify",
         help="re-apply the storey rule to an existing structural_planes.json "
@@ -1063,18 +1105,21 @@ def main(argv: list[str] | None = None) -> int:
     p_reclass.add_argument(
         "--planes", type=Path, required=True, help="path to structural_planes.json"
     )
+    p_reclass.add_argument(
+        "--poses", type=Path, default=None, help="poses.json (tripod evidence)"
+    )
     args = parser.parse_args(argv)
 
     if args.command == "inspect":
         if not args.planes.is_file():
             parser.error(f"planes file not found: {args.planes}")
-        inspect_planes(args.planes)
+        inspect_planes(args.planes, poses_path=args.poses)
         return 0
 
     if args.command == "reclassify":
         if not args.planes.is_file():
             parser.error(f"planes file not found: {args.planes}")
-        reclassify_planes_json(args.planes)
+        reclassify_planes_json(args.planes, poses_path=args.poses)
         return 0
 
     if not args.cache.is_dir():
