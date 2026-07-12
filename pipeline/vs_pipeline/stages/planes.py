@@ -400,11 +400,12 @@ def merge_refined_planes(planes: list[GlobalPlane]) -> list[GlobalPlane]:
     return merged
 
 
-def _has_ceiling_cover(floor: GlobalPlane, ceilings: list[GlobalPlane]) -> bool:
-    """Interiority test: the plan-view UNION of ceilings CEILING_ABOVE_MIN/MAX_M
-    above must cover >= INTERIOR_COVER_MIN of the floor's bbox. Union on a
-    coarse grid -- summing per-ceiling intersections double-counts overlapping
-    ceiling patches, which is exactly how outdoor terrain slipped through v1."""
+def _ceiling_cover_fraction(
+    floor: GlobalPlane, ceilings: list[GlobalPlane]
+) -> float:
+    """Fraction of the floor's plan-view bbox covered by the UNION of ceilings
+    CEILING_ABOVE_MIN/MAX_M above (coarse grid -- summing per-ceiling
+    intersections double-counts overlapping patches; that was the v1 bug)."""
     fx0, fz0 = float(floor.bbox_min[0]), float(floor.bbox_min[2])
     fx1, fz1 = float(floor.bbox_max[0]), float(floor.bbox_max[2])
     nx = max(int(np.ceil((fx1 - fx0) / COVER_CELL_M)), 1)
@@ -420,7 +421,11 @@ def _has_ceiling_cover(floor: GlobalPlane, ceilings: list[GlobalPlane]) -> bool:
         iz1 = min(int(np.ceil((float(c.bbox_max[2]) - fz0) / COVER_CELL_M)), nz)
         if ix1 > ix0 and iz1 > iz0:
             covered[ix0:ix1, iz0:iz1] = True
-    return float(covered.mean()) >= INTERIOR_COVER_MIN
+    return float(covered.mean())
+
+
+def _has_ceiling_cover(floor: GlobalPlane, ceilings: list[GlobalPlane]) -> bool:
+    return _ceiling_cover_fraction(floor, ceilings) >= INTERIOR_COVER_MIN
 
 
 def storey_floor_levels(
@@ -1012,13 +1017,62 @@ def inspect_planes(planes_path: Path, poses_path: Path | None = None) -> None:
         s.elevation_y = (
             float(s.centroid[1]) if s.cls in ("floor", "ceiling") else None
         )
-    levels = sorted(storey_floor_levels(shims, _sweep_heights_from_poses(poses_path)))
+    heights = _sweep_heights_from_poses(poses_path)
+    levels = sorted(storey_floor_levels(shims, heights))
     print(
         "\nstorey FLOOR levels under the current interiority-aware rule "
         "(classes reset from normals first; pass --poses for tripod evidence):"
     )
     for lv in levels:
         print(f"  y = {lv:+7.3f}")
+
+    if heights:
+        hs = sorted(heights)
+        bands: list[list[float]] = [[hs[0]]]
+        for h in hs[1:]:
+            if h - bands[-1][-1] <= 0.3:
+                bands[-1].append(h)
+            else:
+                bands.append([h])
+        print(
+            "\nsweep heights (tripod positions): "
+            + ", ".join(f"{b[0]:+.2f}..{b[-1]:+.2f} ({len(b)})" for b in bands)
+        )
+    else:
+        print("\nsweep heights: not available (no --poses)")
+
+    print(
+        "\nlevel-candidate audit (floors >= "
+        f"{LEVEL_MIN_AREA_M2:.0f} m^2 after class reset; a level definer needs "
+        "tripod PASS + cover PASS + area >= the 30% bar):"
+    )
+    cand_floors = sorted(
+        (s for s in shims if s.cls == "floor" and s.area_m2 >= LEVEL_MIN_AREA_M2),
+        key=lambda q: -q.area_m2,
+    )
+    cand_ceilings = [s for s in shims if s.cls == "ceiling"]
+    for f in cand_floors:
+        e = f.elevation_y if f.elevation_y is not None else float(f.centroid[1])
+        cover = _ceiling_cover_fraction(f, cand_ceilings)
+        cover_txt = (
+            f"cover {cover * 100:3.0f}% "
+            f"{'PASS' if cover >= INTERIOR_COVER_MIN else 'fail'}"
+        )
+        if heights:
+            dys = [h - e for h in heights]
+            in_win = [
+                d for d in dys if TRIPOD_ABOVE_MIN_M <= d <= TRIPOD_ABOVE_MAX_M
+            ]
+            if in_win:
+                tripod_txt = f"tripod PASS ({min(in_win):+.2f} m above)"
+            else:
+                nearest = min(dys, key=lambda d: abs(d - 1.4))
+                tripod_txt = f"tripod fail (nearest sweep {nearest:+.2f} m)"
+        else:
+            tripod_txt = "tripod n/a"
+        print(
+            f"  y = {e:+7.3f}  {f.area_m2:7.2f} m^2  {tripod_txt:<34}  {cover_txt}"
+        )
 
     ceilings = [p for p in planes if p["class"] == "ceiling"]
     max_ceiling_area = max((p["area_m2"] for p in ceilings), default=0.0)
