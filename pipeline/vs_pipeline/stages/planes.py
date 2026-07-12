@@ -441,10 +441,11 @@ def storey_floor_levels(
     AND, when sweep heights are available, >= MIN_LEVEL_SWEEPS sweeps stand
     TRIPOD_ABOVE_MIN/MAX_M above it -- scanners stand on real walkable levels
     (including walk-out gardens / lower levels), while furniture tops collect
-    at most a stray stair sweep. Without sweep heights the biggest patch must
-    instead pass the ceiling-cover test. There is deliberately NO relative
-    area bar: the previous 30%-of-largest rule let one huge low-level patch
-    suppress legitimate but fragmented upper-storey floors (full-run bug).
+    at most a stray stair sweep. With sweep heights there is deliberately NO
+    relative area bar: the previous 30%-of-largest rule let one huge
+    low-level patch suppress legitimate but fragmented upper-storey floors
+    (full-run bug). The no-poses fallback keeps the legacy rule (relative
+    bar + ceiling cover when ceilings exist).
     """
     floors = [
         p for p in planes if p.cls == "floor" and p.elevation_y is not None
@@ -459,6 +460,7 @@ def storey_floor_levels(
             bins[-1].append(f)
         else:
             bins.append([f])
+    fallback_bar = max(LEVEL_MIN_AREA_M2, 0.3 * max(p.area_m2 for p in floors))
     levels: list[float] = []
     for b in bins:
         biggest = max(b, key=lambda p: p.area_m2)
@@ -475,8 +477,13 @@ def storey_floor_levels(
             )
             if standing < MIN_LEVEL_SWEEPS:
                 continue
-        elif not _has_ceiling_cover(biggest, ceilings):
-            continue
+        else:
+            # Legacy no-poses fallback: relative bar + ceiling cover. Tripod
+            # evidence is the primary rule; always pass --poses on real runs.
+            if biggest.area_m2 < fallback_bar:
+                continue
+            if ceilings and not _has_ceiling_cover(biggest, ceilings):
+                continue
         levels.extend(f.elevation_y for f in b)
     return levels
 
