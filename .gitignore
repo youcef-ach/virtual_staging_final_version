@@ -51,4 +51,6 @@ pipeline/perturb_output/
 pipeline/calibration*.json*
 pipeline/diag_*.py
 pipeline/preprocessed/
+pipeline/planes_out/
+pipeline/planes_*/
 dashboard/public/qa/
