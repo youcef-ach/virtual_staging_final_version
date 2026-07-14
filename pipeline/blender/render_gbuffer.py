@@ -4,6 +4,13 @@ Bakes per-face 32-bit EXRs from the proxy (shell + details GLBs):
     <out>/<sweep_uuid>/<face>_depth.exr    Cycles Depth pass (ray length, m)
     <out>/<sweep_uuid>/<face>_normal.exr   Cycles Normal pass (world space,
                                            Blender Z-up == Matterport frame)
+plus .npy siblings of each (loaded back from the saved EXR via bpy --
+headless-safe -- and flipped to cv2 top-left orientation), because Windows
+opencv-python builds often ship without OpenEXR support.
+
+Blender 4/5 compatible: uses the compositing_node_group API on 5.x and
+scene.node_tree on 4.x (same dual-API pattern as render_edges.py). Passes
+route to the scene render output (write_still=True); no File Output nodes.
 
 The glTF importer's Y-up -> Z-up conversion lands the runtime-Y-up proxy
 exactly in the Matterport frame, so gbuffer_jobs.json camera matrices
@@ -22,10 +29,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from pathlib import Path
 
 import bpy
+import numpy as np
 from mathutils import Matrix
 
 
@@ -36,79 +45,106 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--shell", type=Path, required=True)
     parser.add_argument("--details", type=Path, default=None)
     parser.add_argument("--out", type=Path, required=True)
-    parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--limit", type=int, default=0)
     return parser.parse_args(argv)
 
 
-def setup_scene(size: int) -> tuple[object, object, object]:
+def setup_scene(size: int):
     scene = bpy.context.scene
     for obj in list(scene.objects):
         bpy.data.objects.remove(obj, do_unlink=True)
     scene.render.engine = "CYCLES"
     scene.cycles.samples = 1
+    scene.cycles.use_denoising = False
+    scene.cycles.max_bounces = 0
     scene.render.resolution_x = size
     scene.render.resolution_y = size
     scene.render.resolution_percentage = 100
     scene.render.film_transparent = True
+    scene.render.use_compositing = True
+    scene.render.use_file_extension = True
+    scene.view_settings.view_transform = "Standard"
 
     view_layer = scene.view_layers[0]
     view_layer.use_pass_z = True
     view_layer.use_pass_normal = True
 
+    if hasattr(scene, "compositing_node_group"):
+        # Blender 5.x compositor node group API (render_edges.py pattern).
+        if scene.compositing_node_group is None:
+            scene.compositing_node_group = bpy.data.node_groups.new(
+                "Compositor", "CompositorNodeTree"
+            )
+        tree = scene.compositing_node_group
+        for node in list(tree.nodes):
+            tree.nodes.remove(node)
+        rl = tree.nodes.new("CompositorNodeRLayers")
+        group_output = tree.nodes.new("NodeGroupOutput")
+        tree.interface.new_socket(
+            name="Image", in_out="OUTPUT", socket_type="NodeSocketColor"
+        )
+        out_socket = group_output.inputs["Image"]
+    else:
+        # Blender 4.x compositor API.
+        scene.use_nodes = True
+        tree = scene.node_tree
+        for node in list(tree.nodes):
+            tree.nodes.remove(node)
+        rl = tree.nodes.new("CompositorNodeRLayers")
+        composite = tree.nodes.new("CompositorNodeComposite")
+        out_socket = composite.inputs["Image"]
+
     cam_data = bpy.data.cameras.new("gbuffer_cam")
     cam_data.type = "PERSP"
-    cam_data.angle = 1.5707963267948966  # 90 degrees
+    cam_data.angle = math.radians(90.0)
     cam_data.clip_start = 0.01
     cam_data.clip_end = 200.0
     cam = bpy.data.objects.new("gbuffer_cam", cam_data)
     scene.collection.objects.link(cam)
     scene.camera = cam
+    return scene, cam, tree, rl, out_socket
 
-    scene.use_nodes = True
-    tree = scene.node_tree
-    tree.nodes.clear()
-    rl = tree.nodes.new("CompositorNodeRLayers")
-    out_depth = tree.nodes.new("CompositorNodeOutputFile")
-    out_depth.name = "gbuffer_depth_out"
-    out_depth.format.file_format = "OPEN_EXR"
-    out_depth.format.color_depth = "32"
-    out_depth.format.color_mode = "BW"
-    out_normal = tree.nodes.new("CompositorNodeOutputFile")
-    out_normal.name = "gbuffer_normal_out"
-    out_normal.format.file_format = "OPEN_EXR"
-    out_normal.format.color_depth = "32"
-    out_normal.format.color_mode = "RGB"
-    depth_socket = "Depth" if "Depth" in rl.outputs else "Z"
-    tree.links.new(rl.outputs[depth_socket], out_depth.inputs[0])
-    tree.links.new(rl.outputs["Normal"], out_normal.inputs[0])
-    return cam, out_depth, out_normal
+
+def route_pass(scene, tree, rl, out_socket, pass_name: str, color_mode: str) -> None:
+    for link in list(tree.links):
+        tree.links.remove(link)
+    tree.links.new(rl.outputs[pass_name], out_socket)
+    scene.render.image_settings.file_format = "OPEN_EXR"
+    scene.render.image_settings.color_depth = "32"
+    scene.render.image_settings.color_mode = color_mode
 
 
 def import_glb(path: Path) -> None:
     bpy.ops.import_scene.gltf(filepath=str(path))
 
 
-def finalize_output(node: object, target: Path) -> None:
-    """File Output nodes append the frame number; rename to the target."""
-    frame = bpy.context.scene.frame_current
-    base = Path(node.base_path)
-    slot = node.file_slots[0].path
-    produced = base / f"{slot}{frame:04d}.exr"
-    if produced.is_file():
-        target.parent.mkdir(parents=True, exist_ok=True)
-        if target.exists():
-            target.unlink()
-        produced.rename(target)
+def dump_npy(exr_path: Path, depth: bool) -> None:
+    """Round-trip the saved EXR through bpy image loading -> .npy sibling.
+
+    Headless-safe (reads from disk, not the render result). Blender pixel
+    rows start bottom-left; flip to cv2's top-left orientation.
+    """
+    img = bpy.data.images.load(str(exr_path))
+    try:
+        w, h = img.size
+        arr = np.array(img.pixels[:], dtype=np.float32).reshape(h, w, img.channels)
+        arr = np.flipud(arr)
+        data = arr[..., 0] if depth else arr[..., :3]
+        np.save(str(exr_path.with_suffix(".npy")), data)
+    finally:
+        bpy.data.images.remove(img)
 
 
 def main() -> None:
     args = parse_args()
     jobs = json.loads(args.jobs.read_text(encoding="utf-8"))
     size = int(jobs.get("render_size", 2048))
-    cam, out_depth, out_normal = setup_scene(size)
+    scene, cam, tree, rl, out_socket = setup_scene(size)
     import_glb(args.shell)
     if args.details is not None and Path(args.details).is_file():
         import_glb(Path(args.details))
+
+    depth_socket = "Depth" if "Depth" in rl.outputs else "Z"
 
     # Frame-lock sanity: cameras must sit INSIDE the imported proxy bounds.
     mins = [1e12, 1e12, 1e12]
@@ -127,12 +163,11 @@ def main() -> None:
         f"({maxs[0]:+.2f},{maxs[1]:+.2f},{maxs[2]:+.2f})"
     )
 
+    out_root = Path(args.out).resolve()
     sweeps = jobs["sweeps"]
-    if args.limit is not None:
+    if args.limit and args.limit > 0:
         sweeps = sweeps[: args.limit]
-    args.out.mkdir(parents=True, exist_ok=True)
-    scene = bpy.context.scene
-    scene.frame_current = 1
+    out_root.mkdir(parents=True, exist_ok=True)
 
     for entry in sweeps:
         sweep = entry["sweep_uuid"]
@@ -146,26 +181,22 @@ def main() -> None:
             f"[{sweep}] camera ({cx:+.2f},{cy:+.2f},{cz:+.2f}) "
             f"{'INSIDE' if inside else 'OUTSIDE'} proxy bounds"
         )
-        sweep_dir = args.out / sweep
-        targets = [
-            (face, sweep_dir / f"{face}_depth.exr", sweep_dir / f"{face}_normal.exr")
-            for face in entry["faces"]
-        ]
-        if all(d.is_file() and n.is_file() for _, d, n in targets):
-            print(f"[{sweep}] complete -> skip")
-            continue
-        for face, depth_target, normal_target in targets:
+        sweep_dir = out_root / sweep
+        sweep_dir.mkdir(parents=True, exist_ok=True)
+        for face, matrix in entry["faces"].items():
+            depth_target = sweep_dir / f"{face}_depth.exr"
+            normal_target = sweep_dir / f"{face}_normal.exr"
             if depth_target.is_file() and normal_target.is_file():
                 continue
-            cam.matrix_world = Matrix(entry["faces"][face])
-            tmp = sweep_dir / "_tmp"
-            out_depth.base_path = str(tmp)
-            out_depth.file_slots[0].path = f"{face}_depth_"
-            out_normal.base_path = str(tmp)
-            out_normal.file_slots[0].path = f"{face}_normal_"
-            bpy.ops.render.render(write_still=False)
-            finalize_output(out_depth, depth_target)
-            finalize_output(out_normal, normal_target)
+            cam.matrix_world = Matrix(matrix)
+            route_pass(scene, tree, rl, out_socket, depth_socket, "BW")
+            scene.render.filepath = str(depth_target)
+            bpy.ops.render.render(write_still=True)
+            dump_npy(depth_target, depth=True)
+            route_pass(scene, tree, rl, out_socket, "Normal", "RGB")
+            scene.render.filepath = str(normal_target)
+            bpy.ops.render.render(write_still=True)
+            dump_npy(normal_target, depth=False)
         print(f"[{sweep}] done")
     print("gbuffer render complete")
 
