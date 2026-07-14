@@ -33,7 +33,7 @@ from typing import Any
 
 import cv2
 import numpy as np
-from shapely.geometry import Polygon
+from shapely.geometry import Polygon, box
 
 PROXY_SCHEMA_VERSION = 1
 
@@ -95,9 +95,16 @@ def inset_room_polygon(
 
 
 def room_shell_mesh(
-    poly: Polygon, floor_y: float, ceiling_y: float
+    poly: Polygon,
+    floor_y: float,
+    ceiling_y: float,
+    edge_openings: list[list[tuple[float, float, float]]] | None = None,
 ) -> dict[str, Any]:
-    """Labeled prism parts for one room; normals face INTO the room."""
+    """Labeled prism parts for one room; normals face INTO the room.
+
+    ``edge_openings[k]`` holds (s0, s1, y_top) door rects for edge k in the
+    edge's own arc-length parameter; they are subtracted from the wall face.
+    """
     import trimesh
 
     verts2d, faces2d = trimesh.creation.triangulate_polygon(poly)
@@ -121,21 +128,132 @@ def room_shell_mesh(
     ring = np.asarray(poly.exterior.coords, dtype=np.float64)
     for k in range(ring.shape[0] - 1):
         (x0, z0), (x1, z1) = ring[k], ring[k + 1]
-        v = np.array(
-            [
-                [x0, floor_y, z0],
-                [x1, floor_y, z1],
-                [x1, ceiling_y, z1],
-                [x0, ceiling_y, z0],
-            ]
+        a2 = np.array([x0, z0])
+        b2 = np.array([x1, z1])
+        length = float(np.linalg.norm(b2 - a2))
+        if length < 1e-9:
+            continue
+        dir2 = (b2 - a2) / length
+        rects = (
+            edge_openings[k]
+            if edge_openings is not None and k < len(edge_openings)
+            else []
         )
-        f = np.array([[0, 1, 2], [0, 2, 3]])
-        mesh = trimesh.Trimesh(vertices=v, faces=f, process=False)
+        if rects:
+            face = box(0.0, floor_y, length, ceiling_y)
+            for s0, s1, y_top in rects:
+                face = face.difference(
+                    box(
+                        max(s0, 0.02),
+                        floor_y - 0.01,
+                        min(s1, length - 0.02),
+                        y_top,
+                    )
+                )
+            pieces = [face] if face.geom_type == "Polygon" else list(face.geoms)
+            v_parts: list[np.ndarray] = []
+            f_parts: list[np.ndarray] = []
+            offset = 0
+            for piece in pieces:
+                if piece.is_empty or piece.area < 1e-6:
+                    continue
+                v2, f2 = trimesh.creation.triangulate_polygon(piece)
+                v3 = np.column_stack(
+                    [
+                        a2[0] + dir2[0] * v2[:, 0],
+                        v2[:, 1],
+                        a2[1] + dir2[1] * v2[:, 0],
+                    ]
+                )
+                v_parts.append(v3)
+                f_parts.append(f2 + offset)
+                offset += v3.shape[0]
+            if not v_parts:
+                continue
+            mesh = trimesh.Trimesh(
+                vertices=np.vstack(v_parts),
+                faces=np.vstack(f_parts),
+                process=False,
+            )
+        else:
+            v = np.array(
+                [
+                    [x0, floor_y, z0],
+                    [x1, floor_y, z1],
+                    [x1, ceiling_y, z1],
+                    [x0, ceiling_y, z0],
+                ]
+            )
+            f = np.array([[0, 1, 2], [0, 2, 3]])
+            mesh = trimesh.Trimesh(vertices=v, faces=f, process=False)
         mid = np.array([(x0 + x1) / 2.0, 0.0, (z0 + z1) / 2.0])
-        if float(mesh.face_normals[0] @ (centre - mid)) < 0:
+        if float(mesh.face_normals.mean(axis=0) @ (centre - mid)) < 0:
             mesh.invert()
         parts[f"wall_{k:02d}"] = mesh
     return parts
+
+
+def _merge_rects(
+    rects: list[tuple[float, float, float]],
+) -> list[tuple[float, float, float]]:
+    """Merge overlapping (s0, s1, y_top) rects (dedup of pair-face doubles)."""
+    if not rects:
+        return []
+    ordered = sorted(rects)
+    out = [list(ordered[0])]
+    for s0, s1, top in ordered[1:]:
+        if s0 <= out[-1][1] + 0.05:
+            out[-1][1] = max(out[-1][1], s1)
+            out[-1][2] = max(out[-1][2], top)
+        else:
+            out.append([s0, s1, top])
+    return [(a, b, c) for a, b, c in out]
+
+
+def _room_edge_openings(
+    inset_poly: Polygon,
+    edges: list[dict[str, Any]],
+    openings_by_plane: dict[str, list[dict[str, Any]]],
+    ceiling_y: float,
+) -> tuple[list[list[tuple[float, float, float]]], int]:
+    """Assign detected openings to inset-polygon edges as (s0, s1, y_top)."""
+    ring = [
+        np.asarray(p[:2], dtype=np.float64)
+        for p in inset_poly.exterior.coords
+    ][:-1]
+    m = len(ring)
+    out: list[list[tuple[float, float, float]]] = [[] for _ in range(m)]
+    cand_ids = {pid for e in edges for pid in e.get("wall_planes", [])}
+    for pid in sorted(cand_ids):
+        for o in openings_by_plane.get(pid, []):
+            corners = np.asarray(o["corners_3d"], dtype=np.float64)
+            pxz = corners[:, [0, 2]]
+            y_top = float(corners[:, 1].max())
+            mid = pxz.mean(axis=0)
+            best_k: int | None = None
+            best_d = 0.3
+            for k in range(m):
+                a2, b2 = ring[k], ring[(k + 1) % m]
+                length = float(np.linalg.norm(b2 - a2))
+                if length < 1e-9:
+                    continue
+                dir2 = (b2 - a2) / length
+                t = float(np.clip((mid - a2) @ dir2, 0.0, length))
+                d = float(np.linalg.norm(a2 + dir2 * t - mid))
+                if d < best_d:
+                    best_d, best_k = d, k
+            if best_k is None:
+                continue
+            a2, b2 = ring[best_k], ring[(best_k + 1) % m]
+            length = float(np.linalg.norm(b2 - a2))
+            dir2 = (b2 - a2) / length
+            ss = (pxz - a2) @ dir2
+            s0 = float(np.clip(ss.min(), 0.0, length))
+            s1 = float(np.clip(ss.max(), 0.0, length))
+            if s1 - s0 >= 0.4:
+                out[best_k].append((s0, s1, min(y_top, ceiling_y - 0.1)))
+    merged = [_merge_rects(r) for r in out]
+    return merged, sum(len(r) for r in merged)
 
 
 def _palette(index: int) -> tuple[int, int, int]:
@@ -184,10 +302,17 @@ def _render_review(
         )
 
 
-def build_property(rooms_path: Path, out_dir: Path) -> dict[str, Any]:
+def build_property(
+    rooms_path: Path, out_dir: Path, openings_path: Path | None = None
+) -> dict[str, Any]:
     import trimesh
 
     data = json.loads(rooms_path.read_text(encoding="utf-8"))
+    openings_by_plane: dict[str, list[dict[str, Any]]] = {}
+    if openings_path is not None:
+        odata = json.loads(openings_path.read_text(encoding="utf-8"))
+        for o in odata.get("openings", []):
+            openings_by_plane.setdefault(o["plane_id"], []).append(o)
     if data.get("schema_version", 1) < 2:
         raise SystemExit(
             "rooms.json is schema v1 (no per-edge wall data) -- re-run "
@@ -238,7 +363,15 @@ def build_property(rooms_path: Path, out_dir: Path) -> dict[str, Any]:
         ):
             inset_poly = orig
             fallback = True
-        parts = room_shell_mesh(inset_poly, float(floor_y), float(ceiling_y))
+        edge_rects: list[list[tuple[float, float, float]]] | None = None
+        opening_count = 0
+        if openings_by_plane and not fallback:
+            edge_rects, opening_count = _room_edge_openings(
+                inset_poly, edges, openings_by_plane, float(ceiling_y)
+            )
+        parts = room_shell_mesh(
+            inset_poly, float(floor_y), float(ceiling_y), edge_rects
+        )
         merged = trimesh.util.concatenate(list(parts.values()))
         merged.merge_vertices()
         tris = int(sum(len(m.faces) for m in parts.values()))
@@ -251,6 +384,7 @@ def build_property(rooms_path: Path, out_dir: Path) -> dict[str, Any]:
                 "storey_id": room["storey_id"],
                 "triangles": tris,
                 "watertight": bool(merged.is_watertight),
+                "openings": opening_count,
                 "inset_fallback": fallback,
                 "floor_y": round(float(floor_y), 4),
                 "ceiling_y": round(float(ceiling_y), 4),
@@ -273,7 +407,11 @@ def build_property(rooms_path: Path, out_dir: Path) -> dict[str, Any]:
     _render_review(review, out_dir)
 
     for r in manifest_rooms:
-        marks = "" if r["watertight"] else "  NOT WATERTIGHT"
+        marks = ""
+        if not r["watertight"] and r["openings"] == 0:
+            marks += "  NOT WATERTIGHT"
+        if r["openings"]:
+            marks += f"  openings {r['openings']}"
         if r["inset_fallback"]:
             marks += "  inset-fallback"
         print(
@@ -296,12 +434,17 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     p_build = sub.add_parser("build", help="rooms.json -> proxy_shell.glb")
     p_build.add_argument("--rooms", type=Path, required=True, help="rooms.json")
+    p_build.add_argument(
+        "--openings", type=Path, default=None, help="openings.json (door cutouts)"
+    )
     p_build.add_argument("--output", "-o", type=Path, default=Path("proxy_out"))
     args = parser.parse_args(argv)
 
     if not args.rooms.is_file():
         parser.error(f"rooms file not found: {args.rooms}")
-    build_property(args.rooms, args.output)
+    if args.openings is not None and not args.openings.is_file():
+        parser.error(f"openings file not found: {args.openings}")
+    build_property(args.rooms, args.output, openings_path=args.openings)
     return 0
 
 
