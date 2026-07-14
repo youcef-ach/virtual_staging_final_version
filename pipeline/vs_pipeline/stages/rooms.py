@@ -634,7 +634,7 @@ def build_rooms(
                 <= ORPHAN_RADIUS_M
             ]
             virtual_used = len(near)
-            segments = close_dangling_ends(segments + near, orphan_pts=orphans)
+            segments = close_dangling_ends(segments + near)
             faces = polygonize_rooms(segments)
         print(
             f"storey {st.storey_id}: {len(orphans)} orphan sweep(s), "
@@ -874,6 +874,216 @@ def render_review(review: list[dict[str, Any]], out_dir: Path, size_px: int = 16
         cv2.imwrite(str(out_dir / f"rooms_review_storey{st.storey_id}.png"), image)
 
 
+def _storey_patches(
+    planes: list[dict[str, Any]], st: Storey
+) -> tuple[
+    list[tuple[dict[str, Any], Polygon]], list[tuple[dict[str, Any], Polygon]]
+]:
+    lo, hi = st.floor_span[0] - 0.15, st.floor_span[1] + 0.15
+    floor_patches = [
+        (p, _poly_from_plane(p))
+        for p in planes
+        if p["class"] == "floor"
+        and p.get("elevation_y") is not None
+        and lo <= p["elevation_y"] <= hi
+    ]
+    ceiling_patches = [
+        (p, _poly_from_plane(p))
+        for p in planes
+        if p["class"] == "ceiling"
+        and p.get("elevation_y") is not None
+        and st.floor_y + CEILING_MIN_ABOVE_M
+        < p["elevation_y"]
+        < st.floor_y + CEILING_MAX_ABOVE_M
+    ]
+    return floor_patches, ceiling_patches
+
+
+def probe_sweeps(
+    planes: list[dict[str, Any]],
+    sweeps: list[tuple[int, np.ndarray]],
+    indices: list[int],
+    out_dir: Path,
+) -> None:
+    """Instrumented per-sweep diagnosis of the room graph (no heuristics)."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    storeys = detect_storeys(planes, sweeps)
+    pos_by_idx = {i: p for i, p in sweeps}
+    for idx in indices:
+        if idx not in pos_by_idx:
+            print(f"sweep [{idx:03d}] not found in poses")
+            continue
+        pos = pos_by_idx[idx]
+        height = float(pos[1])
+        pt = Point(float(pos[0]), float(pos[2]))
+        print(
+            f"\nsweep [{idx:03d}]  plan ({pos[0]:+.2f}, {pos[2]:+.2f})  "
+            f"height {height:+.2f}"
+        )
+        member_st: Storey | None = None
+        for st in storeys:
+            dy = height - st.floor_y
+            member = idx in st.sweep_indices
+            verdict = (
+                "MEMBER"
+                if member
+                else f"not member (dy outside {TRIPOD_MIN_M}..{TRIPOD_MAX_M})"
+            )
+            print(
+                f"  storey {st.storey_id}: floor {st.floor_y:+.3f}  "
+                f"dy {dy:+.2f}  -> {verdict}"
+            )
+            if member:
+                member_st = st
+        st = member_st or min(
+            storeys, key=lambda s: abs(height - s.floor_y - 1.4)
+        )
+        if member_st is None:
+            print(
+                f"  NOT in any storey sweep set -> probing nearest "
+                f"storey {st.storey_id}"
+            )
+        floor_patches, ceiling_patches = _storey_patches(planes, st)
+        segments = close_dangling_ends(
+            merge_segments(wall_segments(storey_walls(planes, st)))
+        )
+        faces = polygonize_rooms(segments)
+        floor_union = unary_union([poly for _, poly in floor_patches])
+        ceiling_union = unary_union(
+            [
+                poly
+                for _, poly in ceiling_patches
+                if not poly.is_empty and poly.area >= CEILING_CLOSURE_MIN_AREA_M2
+            ]
+        )
+        containing = [f for f in faces if f.contains(pt)]
+        if not containing:
+            print("  contained in NO polygonized face (true void)")
+        for f in containing:
+            cover = (
+                f.intersection(floor_union).area / f.area
+                if not floor_union.is_empty
+                else 0.0
+            )
+            sliver = f.buffer(-MIN_ROOM_WIDTH_M / 2).is_empty
+            accepted = (
+                f.area >= MIN_ROOM_AREA_M2
+                and not sliver
+                and (cover >= MIN_FLOOR_COVER or cover >= MIN_FLOOR_COVER_SWEPT)
+            )
+            print(
+                f"  in face: area {f.area:8.2f} m^2  floor cover {cover:4.0%}  "
+                f"sliver={sliver}  acceptable~{accepted}"
+            )
+        fcov = bool(not floor_union.is_empty and floor_union.covers(pt))
+        ccov = bool(not ceiling_union.is_empty and ceiling_union.covers(pt))
+        print(f"  floor union covers: {fcov}   ceiling union covers: {ccov}")
+        nearest = sorted(
+            (
+                (
+                    float(
+                        LineString([tuple(s.p0), tuple(s.p1)]).distance(pt)
+                    ),
+                    s,
+                )
+                for s in segments
+            ),
+            key=lambda t: t[0],
+        )[:12]
+        print("  nearest wall segments:")
+        for dist, s in nearest:
+            length = float(np.linalg.norm(s.p1 - s.p0))
+            ids = ",".join(s.plane_ids[:3]) or "-"
+            print(
+                f"    d {dist:5.2f} m  len {length:5.2f} m  "
+                f"th {s.thickness}  {ids}"
+            )
+        virtual = ceiling_closure_segments(ceiling_patches, segments)
+        vnear = [
+            s
+            for s in virtual
+            if LineString([tuple(s.p0), tuple(s.p1)]).distance(pt) <= 8.0
+        ]
+        print(f"  ceiling-closure candidates within 8 m: {len(vnear)}")
+
+        half = 6.0
+        size_px = 1200
+        scale = (size_px - 40) / (2 * half)
+
+        def px(x: float, z: float) -> tuple[int, int]:
+            return (
+                int((x - (pt.x - half)) * scale) + 20,
+                int((z - (pt.y - half)) * scale) + 20,
+            )
+
+        image = np.zeros((size_px, size_px, 3), dtype=np.uint8)
+        overlay = image.copy()
+        for k, f in enumerate(faces):
+            if f.distance(pt) > half:
+                continue
+            for ring in _exterior_rings_probe(f):
+                pts = np.array(
+                    [px(x, z) for x, z in ring.coords], dtype=np.int32
+                )
+                cv2.fillPoly(overlay, [pts], _palette(k))
+        image = cv2.addWeighted(overlay, 0.35, image, 0.65, 0)
+        for _, poly in floor_patches:
+            if poly.is_empty or poly.distance(pt) > half:
+                continue
+            for ring in _exterior_rings_probe(poly):
+                pts = np.array(
+                    [px(x, z) for x, z in ring.coords], dtype=np.int32
+                )
+                cv2.polylines(image, [pts], True, (90, 90, 90), 1)
+        for s in virtual:
+            cv2.line(
+                image,
+                px(float(s.p0[0]), float(s.p0[1])),
+                px(float(s.p1[0]), float(s.p1[1])),
+                (0, 165, 255),
+                2,
+            )
+        for s in segments:
+            th = max(2, int(round((s.thickness or 0.06) * scale)))
+            cv2.line(
+                image,
+                px(float(s.p0[0]), float(s.p0[1])),
+                px(float(s.p1[0]), float(s.p1[1])),
+                (255, 255, 255),
+                th,
+            )
+        for other_idx, other_pos in sweeps:
+            ox, oz = float(other_pos[0]), float(other_pos[2])
+            if abs(ox - pt.x) > half or abs(oz - pt.y) > half:
+                continue
+            colour = (0, 0, 255) if other_idx == idx else (0, 220, 255)
+            u, v = px(ox, oz)
+            cv2.drawMarker(image, (u, v), colour, cv2.MARKER_CROSS, 14, 2)
+            cv2.putText(
+                image,
+                str(other_idx),
+                (u + 8, v - 6),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.45,
+                colour,
+                1,
+                cv2.LINE_AA,
+            )
+        out_path = out_dir / f"probe_{idx:03d}.png"
+        cv2.imwrite(str(out_path), image)
+        print(f"  crop render -> {out_path}")
+
+
+def _exterior_rings_probe(geom: Any) -> list[Any]:
+    if geom.is_empty:
+        return []
+    if geom.geom_type == "Polygon":
+        return [geom.exterior]
+    if geom.geom_type == "MultiPolygon":
+        return [g.exterior for g in geom.geoms]
+    return []
+
+
 def build_property(planes_path: Path, poses_path: Path, out_dir: Path) -> dict[str, Any]:
     from vs_pipeline.stages.pose import read_poses_json
 
@@ -923,12 +1133,34 @@ def main(argv: list[str] | None = None) -> int:
         "--poses", type=Path, required=True, help="poses.json (tripod evidence)"
     )
     p_build.add_argument("--output", "-o", type=Path, default=Path("rooms_out"))
+    p_probe = sub.add_parser(
+        "probe", help="per-sweep room-graph diagnosis (crop render + report)"
+    )
+    p_probe.add_argument(
+        "--planes", type=Path, required=True, help="structural_planes.json"
+    )
+    p_probe.add_argument("--poses", type=Path, required=True, help="poses.json")
+    p_probe.add_argument(
+        "--sweeps", type=str, required=True, help='e.g. "58-61,175"'
+    )
+    p_probe.add_argument("--output", "-o", type=Path, default=Path("probe_out"))
     args = parser.parse_args(argv)
 
     if not args.planes.is_file():
         parser.error(f"planes file not found: {args.planes}")
     if not args.poses.is_file():
         parser.error(f"poses file not found: {args.poses}")
+    if args.command == "probe":
+        from vs_pipeline.stages.planes import parse_sweep_spec
+        from vs_pipeline.stages.pose import read_poses_json
+
+        data = json.loads(args.planes.read_text(encoding="utf-8"))
+        sweeps = [
+            (s.index, s.pose_rt[:3, 3]) for s in read_poses_json(args.poses)
+        ]
+        indices = parse_sweep_spec(args.sweeps, [i for i, _ in sweeps])
+        probe_sweeps(data["planes"], sweeps, indices, args.output)
+        return 0
     build_property(args.planes, args.poses, args.output)
     return 0
 
