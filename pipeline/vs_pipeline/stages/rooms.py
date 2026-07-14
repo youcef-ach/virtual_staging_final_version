@@ -83,7 +83,7 @@ EDGE_MATCH_MAX_DIST_M = 0.3
 #: by real wall segments become virtual wall lines (glass walls leave few
 #: LiDAR returns; the solid ceiling ends exactly above them).
 CEILING_CLOSURE_MIN_AREA_M2 = 4.0
-CEILING_SIMPLIFY_M = 0.05
+CEILING_SIMPLIFY_M = 0.15
 CEILING_EDGE_MIN_LENGTH_M = 0.5
 CEILING_EDGE_WALL_TOL_M = 0.3
 CEILING_EDGE_COVERED_FRACTION = 0.6
@@ -322,6 +322,43 @@ def ceiling_closure_segments(
         else [g for g in getattr(union, "geoms", []) if g.geom_type == "Polygon"]
     )
     seg_lines = [LineString([tuple(s.p0), tuple(s.p1)]) for s in segments]
+
+    def covered_fraction(pa: np.ndarray, pb: np.ndarray) -> float:
+        """Interval-union cover of the edge by wall lines (no double count)."""
+        d = pb - pa
+        length = float(np.linalg.norm(d))
+        if length < 1e-9:
+            return 1.0
+        d = d / length
+        buf = LineString([tuple(pa), tuple(pb)]).buffer(CEILING_EDGE_WALL_TOL_M)
+        intervals: list[tuple[float, float]] = []
+        for line in seg_lines:
+            inter = line.intersection(buf)
+            if inter.is_empty:
+                continue
+            for g in getattr(inter, "geoms", [inter]):
+                coords = np.asarray(getattr(g, "coords", []), dtype=np.float64)
+                if coords.size == 0:
+                    continue
+                ts = (coords - pa) @ d
+                t0 = max(float(ts.min()), 0.0)
+                t1 = min(float(ts.max()), length)
+                if t1 > t0:
+                    intervals.append((t0, t1))
+        if not intervals:
+            return 0.0
+        intervals.sort()
+        covered = 0.0
+        cur0, cur1 = intervals[0]
+        for t0, t1 in intervals[1:]:
+            if t0 <= cur1:
+                cur1 = max(cur1, t1)
+            else:
+                covered += cur1 - cur0
+                cur0, cur1 = t0, t1
+        covered += cur1 - cur0
+        return covered / length
+
     virtual: list[WallSegment] = []
     for poly in outers:
         simplified = poly.simplify(CEILING_SIMPLIFY_M)
@@ -332,9 +369,9 @@ def ceiling_closure_segments(
             edge = LineString([a, b])
             if edge.length < CEILING_EDGE_MIN_LENGTH_M:
                 continue
-            buf = edge.buffer(CEILING_EDGE_WALL_TOL_M)
-            covered = sum(line.intersection(buf).length for line in seg_lines)
-            if covered >= CEILING_EDGE_COVERED_FRACTION * edge.length:
+            pa = np.asarray(a, dtype=np.float64)
+            pb = np.asarray(b, dtype=np.float64)
+            if covered_fraction(pa, pb) >= CEILING_EDGE_COVERED_FRACTION:
                 continue
             virtual.append(
                 WallSegment(
@@ -522,7 +559,12 @@ def build_rooms(
             < st.floor_y + CEILING_MAX_ABOVE_M
         ]
         segments = merge_segments(wall_segments(storey_walls(planes, st)))
-        segments.extend(ceiling_closure_segments(ceiling_patches, segments))
+        virtual_segments = ceiling_closure_segments(ceiling_patches, segments)
+        print(
+            f"storey {st.storey_id}: {len(virtual_segments)} "
+            "ceiling-closure segment(s)"
+        )
+        segments.extend(virtual_segments)
         segments = close_dangling_ends(segments)
         faces = polygonize_rooms(segments)
 
