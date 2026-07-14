@@ -169,6 +169,21 @@ def test_doorway_gap_closed_by_dangling_extension():
     assert 12.0 < payload["rooms"][0]["area_m2"] < 20.0
 
 
+def test_floor_outline_closure_when_ceiling_missing():
+    """Glass room whose ceiling the LiDAR missed closes via its floor outline."""
+    planes = [
+        _wall("wall_60", (0, 0), (4, 0)),
+        _wall("wall_61", (4, 0), (4, 4)),
+        _wall("wall_62", (0, 4), (0, 0)),
+        # north side glass, and NO overhead plane detected at all
+        _horizontal("floor_00", "floor", 0, 0, 4, 4, 0.0),
+    ]
+    sweeps = _sweeps([[2, 1.4, 2], [1, 1.4, 1], [3, 1.4, 3]])
+    payload, _ = build_rooms(planes, sweeps)
+    assert len(payload["rooms"]) == 1
+    assert 12.0 < payload["rooms"][0]["area_m2"] < 20.0
+
+
 def test_sliver_between_opposing_faces_rejected():
     """A 0.5 m wedge between unpaired opposing wall faces is not a room."""
     planes = _two_room_planes() + [

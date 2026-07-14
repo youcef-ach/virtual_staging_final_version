@@ -112,6 +112,18 @@ voids): why are the sill/lintel wall planes around these glass rooms so
 fragmented that gaps exceed 1.2 m? Knobs: `CEILING_EDGE_COVERED_FRACTION`
 (0.6), `CEILING_EDGE_WALL_TOL_M` (0.3), `CEILING_SIMPLIFY_M` (0.15),
 `DANGLE_ORPHAN_EXTEND_M` (4.0), `ORPHAN_RADIUS_M` (6.0).
+ROOT CAUSE FOUND (probe, 2026-07-12): both voids have NO plane classed
+`ceiling` above them (`ceiling union covers: False`) despite being real
+interior rooms — the ceilings are plausibly the down-facing `other` planes
+(demoted by the 0.25 m ceiling-level tolerance, e.g. +6.07 vs the +6.59
+level; kitchen bulkheads at +1.7). v5 (pending validation) expands the
+evidence: overhead union includes down-facing `other` planes, and the
+storey FLOOR outline becomes a co-equal virtual-wall source (floors are
+solid and end at the glass; floor-evidence orphans must be wall-adjacent
+to keep the open yard out). Still open: why G2 misses/demotes these
+ceilings at all — ties into #1/#2 and the 0.25 m `LEVEL_TOLERANCE_M`
+ceiling rule; the demotion-to-`other` of near-level ceilings deserves its
+own revisit.
 - Research: Floor-SP, RoomFormer, HEAT (holistic edge attention
   transformer), “floorplan reconstruction from point clouds”, PolyFit —
   as alternatives or validators for the whole wall-graph→polygonize chain.

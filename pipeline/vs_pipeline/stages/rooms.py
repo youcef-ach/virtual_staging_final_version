@@ -93,6 +93,12 @@ ORPHAN_RADIUS_M = 6.0
 #: Near orphans, dangling wall ends may extend further: wall lines
 #: physically continue across windows (sill below, lintel above).
 DANGLE_ORPHAN_EXTEND_M = 4.0
+#: Overhead evidence includes down-facing `other` planes (ceilings demoted
+#: by storey-level reclassification, slopes); matches G2's horizontal test.
+OVERHEAD_NY = 0.92
+#: Floor-evidence orphans must be wall-adjacent (keeps the open yard out).
+ORPHAN_WALL_RADIUS_M = 3.5
+ORPHAN_MIN_NEAR_WALLS = 2
 
 
 @dataclass
@@ -311,6 +317,20 @@ def close_dangling_ends(
             )
         )
     return out
+
+
+def _overhead_elevation(plane: dict[str, Any]) -> float | None:
+    """Elevation of overhead evidence: `ceiling` planes plus down-facing
+    `other` planes (ceilings demoted by storey-level reclassification,
+    slopes) -- closure must not be gated on a class label."""
+    if plane["class"] == "ceiling" and plane.get("elevation_y") is not None:
+        return float(plane["elevation_y"])
+    if (
+        plane["class"] == "other"
+        and float(plane["coefficients"][1]) <= -OVERHEAD_NY
+    ):
+        return float(plane["centroid"][1])
+    return None
 
 
 def ceiling_closure_segments(
@@ -557,23 +577,7 @@ def build_rooms(
     review: list[dict[str, Any]] = []
 
     for st in storeys:
-        lo, hi = st.floor_span[0] - 0.15, st.floor_span[1] + 0.15
-        floor_patches = [
-            (p, _poly_from_plane(p))
-            for p in planes
-            if p["class"] == "floor"
-            and p.get("elevation_y") is not None
-            and lo <= p["elevation_y"] <= hi
-        ]
-        ceiling_patches = [
-            (p, _poly_from_plane(p))
-            for p in planes
-            if p["class"] == "ceiling"
-            and p.get("elevation_y") is not None
-            and st.floor_y + CEILING_MIN_ABOVE_M
-            < p["elevation_y"]
-            < st.floor_y + CEILING_MAX_ABOVE_M
-        ]
+        floor_patches, ceiling_patches = _storey_patches(planes, st)
         segments = close_dangling_ends(
             merge_segments(wall_segments(storey_walls(planes, st)))
         )
@@ -606,7 +610,7 @@ def build_rooms(
             inside = any(face.contains(pt) for _, pt in sweep_pts)
             return inside and cover >= MIN_FLOOR_COVER_SWEPT
 
-        ceiling_union = unary_union(
+        overhead_union = unary_union(
             [
                 poly
                 for _, poly in ceiling_patches
@@ -614,16 +618,32 @@ def build_rooms(
             ]
         )
         housed = [f for f in faces if _face_is_room(f)]
-        orphans = [
-            pt
-            for _, pt in sweep_pts
-            if not any(f.contains(pt) for f in housed)
-            and not ceiling_union.is_empty
-            and ceiling_union.covers(pt)
+        seg_lines_orph = [
+            LineString([tuple(s.p0), tuple(s.p1)]) for s in segments
         ]
+
+        def _orphan(pt: Point) -> bool:
+            if any(f.contains(pt) for f in housed):
+                return False
+            if not overhead_union.is_empty and overhead_union.covers(pt):
+                return True
+            # Floor-evidence orphans must be wall-adjacent: open-yard sweeps
+            # (floor-covered at garden storeys) never qualify.
+            if floor_union.is_empty or not floor_union.covers(pt):
+                return False
+            near_walls = sum(
+                1
+                for line in seg_lines_orph
+                if line.distance(pt) <= ORPHAN_WALL_RADIUS_M
+            )
+            return near_walls >= ORPHAN_MIN_NEAR_WALLS
+
+        orphans = [pt for _, pt in sweep_pts if _orphan(pt)]
         virtual_used = 0
         if orphans:
-            candidates = ceiling_closure_segments(ceiling_patches, segments)
+            candidates = ceiling_closure_segments(
+                ceiling_patches, segments
+            ) + ceiling_closure_segments(floor_patches, segments)
             near = [
                 s
                 for s in candidates
@@ -707,7 +727,9 @@ def build_rooms(
                         ceiling_plane["plane_id"] if ceiling_plane else None
                     ),
                     "ceiling_elevation_y": (
-                        ceiling_plane["elevation_y"] if ceiling_plane else None
+                        _overhead_elevation(ceiling_plane)
+                        if ceiling_plane
+                        else None
                     ),
                     "ceiling_coverage": round(ceiling_cov, 3),
                     "wall_planes": sorted(set(wall_ids)),
@@ -890,11 +912,8 @@ def _storey_patches(
     ceiling_patches = [
         (p, _poly_from_plane(p))
         for p in planes
-        if p["class"] == "ceiling"
-        and p.get("elevation_y") is not None
-        and st.floor_y + CEILING_MIN_ABOVE_M
-        < p["elevation_y"]
-        < st.floor_y + CEILING_MAX_ABOVE_M
+        if (e := _overhead_elevation(p)) is not None
+        and st.floor_y + CEILING_MIN_ABOVE_M < e < st.floor_y + CEILING_MAX_ABOVE_M
     ]
     return floor_patches, ceiling_patches
 
