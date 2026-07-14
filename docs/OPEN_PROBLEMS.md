@@ -124,6 +124,16 @@ to keep the open yard out). Still open: why G2 misses/demotes these
 ceilings at all — ties into #1/#2 and the 0.25 m `LEVEL_TOLERANCE_M`
 ceiling rule; the demotion-to-`other` of near-level ceilings deserves its
 own revisit.
+FINAL STATUS (2026-07-12): v5 also failed — floor outlines are too noisy
+(fragmented patches, furniture shadows → 297 virtual segments across the
+three storeys, the garage shattered, healthy rooms fragmented, and the
+voids STILL open). Auto-closure of glass rooms is hereby PARKED AS
+RESEARCH; the shipped production path is operator-authored manual walls
+(`rooms build --close-file closures.json`, endpoints read off the probe
+renders' 1 m coordinate grid). Research directions: Floor-SP / RoomFormer
+/ HEAT-style learned floorplan reconstruction; G6 window masks to recover
+glass wall lines from imagery; fixing the G2 near-level ceiling demotion
+and under-merge so honest overhead evidence exists in the first place.
 - Research: Floor-SP, RoomFormer, HEAT (holistic edge attention
   transformer), “floorplan reconstruction from point clouds”, PolyFit —
   as alternatives or validators for the whole wall-graph→polygonize chain.

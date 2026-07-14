@@ -564,10 +564,15 @@ def _elect(
 
 
 def build_rooms(
-    planes: list[dict[str, Any]], sweeps: list[tuple[int, np.ndarray]]
+    planes: list[dict[str, Any]],
+    sweeps: list[tuple[int, np.ndarray]],
+    manual_walls: list[dict[str, Any]] | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Core pass: storeys -> wall graph -> rooms -> elections -> exteriors.
 
+    ``manual_walls``: operator-authored virtual walls, the production path
+    for closing glass rooms the LiDAR cannot:
+    [{"storey": 1, "p0": [x, z], "p1": [x, z], "thickness_m": 0.1}, ...]
     Returns (rooms.json payload, per-storey review data for rendering).
     """
     storeys = detect_storeys(planes, sweeps)
@@ -578,9 +583,21 @@ def build_rooms(
 
     for st in storeys:
         floor_patches, ceiling_patches = _storey_patches(planes, st)
-        segments = close_dangling_ends(
-            merge_segments(wall_segments(storey_walls(planes, st)))
-        )
+        segments = merge_segments(wall_segments(storey_walls(planes, st)))
+        for w in manual_walls or []:
+            if w.get("storey") is not None and int(w["storey"]) != st.storey_id:
+                continue
+            segments.append(
+                WallSegment(
+                    p0=np.asarray(w["p0"], dtype=np.float64),
+                    p1=np.asarray(w["p1"], dtype=np.float64),
+                    thickness=w.get("thickness_m"),
+                    plane_ids=[],
+                    weight=1.0,
+                    virtual=True,
+                )
+            )
+        segments = close_dangling_ends(segments)
         faces = polygonize_rooms(segments)
 
         floor_union = unary_union([poly for _, poly in floor_patches])
@@ -610,40 +627,32 @@ def build_rooms(
             inside = any(face.contains(pt) for _, pt in sweep_pts)
             return inside and cover >= MIN_FLOOR_COVER_SWEPT
 
+        # Auto-closure evidence is restricted to class-`ceiling` patches
+        # (v3-stable config). Broader evidence (demoted ceilings, floor
+        # outlines) over-triggered catastrophically on real data; glass-room
+        # auto-closure is parked as research (docs/OPEN_PROBLEMS.md #8) and
+        # operator --close-file walls are the production path.
+        ceiling_class_patches = [
+            (p, poly) for p, poly in ceiling_patches if p["class"] == "ceiling"
+        ]
         overhead_union = unary_union(
             [
                 poly
-                for _, poly in ceiling_patches
+                for _, poly in ceiling_class_patches
                 if not poly.is_empty and poly.area >= CEILING_CLOSURE_MIN_AREA_M2
             ]
         )
         housed = [f for f in faces if _face_is_room(f)]
-        seg_lines_orph = [
-            LineString([tuple(s.p0), tuple(s.p1)]) for s in segments
+        orphans = [
+            pt
+            for _, pt in sweep_pts
+            if not any(f.contains(pt) for f in housed)
+            and not overhead_union.is_empty
+            and overhead_union.covers(pt)
         ]
-
-        def _orphan(pt: Point) -> bool:
-            if any(f.contains(pt) for f in housed):
-                return False
-            if not overhead_union.is_empty and overhead_union.covers(pt):
-                return True
-            # Floor-evidence orphans must be wall-adjacent: open-yard sweeps
-            # (floor-covered at garden storeys) never qualify.
-            if floor_union.is_empty or not floor_union.covers(pt):
-                return False
-            near_walls = sum(
-                1
-                for line in seg_lines_orph
-                if line.distance(pt) <= ORPHAN_WALL_RADIUS_M
-            )
-            return near_walls >= ORPHAN_MIN_NEAR_WALLS
-
-        orphans = [pt for _, pt in sweep_pts if _orphan(pt)]
         virtual_used = 0
         if orphans:
-            candidates = ceiling_closure_segments(
-                ceiling_patches, segments
-            ) + ceiling_closure_segments(floor_patches, segments)
+            candidates = ceiling_closure_segments(ceiling_class_patches, segments)
             near = [
                 s
                 for s in candidates
@@ -1036,6 +1045,33 @@ def probe_sweeps(
             )
 
         image = np.zeros((size_px, size_px, 3), dtype=np.uint8)
+        # 1 m world-coordinate grid + labels (authoring aid for --close-file).
+        for gx in np.arange(np.ceil(pt.x - half), pt.x + half + 1e-6, 1.0):
+            u, _ = px(float(gx), pt.y)
+            cv2.line(image, (u, 0), (u, size_px - 1), (45, 45, 45), 1)
+            cv2.putText(
+                image,
+                f"{gx:.0f}",
+                (u + 2, 14),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.35,
+                (130, 130, 130),
+                1,
+                cv2.LINE_AA,
+            )
+        for gz in np.arange(np.ceil(pt.y - half), pt.y + half + 1e-6, 1.0):
+            _, v = px(pt.x, float(gz))
+            cv2.line(image, (0, v), (size_px - 1, v), (45, 45, 45), 1)
+            cv2.putText(
+                image,
+                f"{gz:.0f}",
+                (2, v - 2),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.35,
+                (130, 130, 130),
+                1,
+                cv2.LINE_AA,
+            )
         overlay = image.copy()
         for k, f in enumerate(faces):
             if f.distance(pt) > half:
@@ -1103,13 +1139,24 @@ def _exterior_rings_probe(geom: Any) -> list[Any]:
     return []
 
 
-def build_property(planes_path: Path, poses_path: Path, out_dir: Path) -> dict[str, Any]:
+def build_property(
+    planes_path: Path,
+    poses_path: Path,
+    out_dir: Path,
+    close_file: Path | None = None,
+) -> dict[str, Any]:
     from vs_pipeline.stages.pose import read_poses_json
 
     data = json.loads(planes_path.read_text(encoding="utf-8"))
     planes = data["planes"]
     sweeps = [(s.index, s.pose_rt[:3, 3]) for s in read_poses_json(poses_path)]
-    payload, review = build_rooms(planes, sweeps)
+    manual_walls: list[dict[str, Any]] = []
+    if close_file is not None:
+        manual_walls = json.loads(close_file.read_text(encoding="utf-8")).get(
+            "walls", []
+        )
+        print(f"{len(manual_walls)} manual closure wall(s) from {close_file}")
+    payload, review = build_rooms(planes, sweeps, manual_walls=manual_walls)
 
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "rooms.json").write_text(
@@ -1151,6 +1198,13 @@ def main(argv: list[str] | None = None) -> int:
     p_build.add_argument(
         "--poses", type=Path, required=True, help="poses.json (tripod evidence)"
     )
+    p_build.add_argument(
+        "--close-file",
+        type=Path,
+        default=None,
+        help='manual virtual walls JSON: {"walls": [{"storey": 1, '
+        '"p0": [x, z], "p1": [x, z]}]} (world plan coords; see probe grid)',
+    )
     p_build.add_argument("--output", "-o", type=Path, default=Path("rooms_out"))
     p_probe = sub.add_parser(
         "probe", help="per-sweep room-graph diagnosis (crop render + report)"
@@ -1180,7 +1234,11 @@ def main(argv: list[str] | None = None) -> int:
         indices = parse_sweep_spec(args.sweeps, [i for i, _ in sweeps])
         probe_sweeps(data["planes"], sweeps, indices, args.output)
         return 0
-    build_property(args.planes, args.poses, args.output)
+    if args.close_file is not None and not args.close_file.is_file():
+        parser.error(f"close file not found: {args.close_file}")
+    build_property(
+        args.planes, args.poses, args.output, close_file=args.close_file
+    )
     return 0
 
 
