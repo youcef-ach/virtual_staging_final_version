@@ -253,6 +253,8 @@ def _normalized_overlap(pano_dilated: np.ndarray, render_edges: np.ndarray) -> f
     alignment still scores 1.0; a chance-level alignment scores ~0.0; worse
     than chance is negative.
     """
+    if int(np.count_nonzero(render_edges)) == 0:
+        return 0.0  # no rendered edges -> no signal, not worse-than-chance
     density = _mask_density(pano_dilated)
     if density >= 1.0:
         return 0.0
