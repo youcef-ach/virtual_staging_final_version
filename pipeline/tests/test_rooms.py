@@ -179,3 +179,19 @@ def test_sliver_between_opposing_faces_rejected():
     )
     payload, _ = build_rooms(planes, sweeps)
     assert len(payload["rooms"]) == 2  # sliver face (0.5 x 4 m) dropped
+
+
+def test_ceiling_closure_recovers_glass_wall_room():
+    """A room whose 4th side is glass (no wall plane) closes via its ceiling."""
+    planes = [
+        _wall("wall_50", (0, 0), (4, 0)),
+        _wall("wall_51", (4, 0), (4, 4)),
+        _wall("wall_52", (0, 4), (0, 0)),
+        # north side (0,4)-(4,4): glass, no LiDAR wall returns
+        _horizontal("floor_00", "floor", 0, 0, 4, 4, 0.0),
+        _horizontal("ceiling_00", "ceiling", 0, 0, 4, 4, 2.7),
+    ]
+    sweeps = _sweeps([[2, 1.4, 2], [1, 1.4, 1], [3, 1.4, 3]])
+    payload, _ = build_rooms(planes, sweeps)
+    assert len(payload["rooms"]) == 1
+    assert 12.0 < payload["rooms"][0]["area_m2"] < 20.0

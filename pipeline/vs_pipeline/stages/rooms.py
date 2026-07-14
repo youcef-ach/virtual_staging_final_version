@@ -79,6 +79,14 @@ WALL_ELECT_MIN_LENGTH_M = 0.4
 #: shell stage (interior-face offsetting needs per-edge wall thickness).
 POLYGON_SIMPLIFY_M = 0.02
 EDGE_MATCH_MAX_DIST_M = 0.3
+#: Ceiling-outline closure: edges of the storey ceiling UNION not covered
+#: by real wall segments become virtual wall lines (glass walls leave few
+#: LiDAR returns; the solid ceiling ends exactly above them).
+CEILING_CLOSURE_MIN_AREA_M2 = 4.0
+CEILING_SIMPLIFY_M = 0.05
+CEILING_EDGE_MIN_LENGTH_M = 0.5
+CEILING_EDGE_WALL_TOL_M = 0.3
+CEILING_EDGE_COVERED_FRACTION = 0.6
 
 
 @dataclass
@@ -97,6 +105,7 @@ class WallSegment:
     thickness: float | None
     plane_ids: list[str]
     weight: float
+    virtual: bool = False  # sourced from ceiling outline, not wall inliers
 
 
 def _plan_points(plane: dict[str, Any]) -> np.ndarray:
@@ -288,6 +297,58 @@ def close_dangling_ends(segments: list[WallSegment]) -> list[WallSegment]:
     return out
 
 
+def ceiling_closure_segments(
+    ceiling_patches: list[tuple[dict[str, Any], Polygon]],
+    segments: list[WallSegment],
+) -> list[WallSegment]:
+    """Virtual wall segments from the ceiling union boundary (glass walls).
+
+    The UNION of the storey's ceiling patches is used (per-patch boundaries
+    would inject seam edges from G2 under-merged duplicates as fake walls).
+    Boundary edges already covered by real wall segments are skipped; the
+    remainder are exactly the wall-less stretches (glass) to close.
+    """
+    polys = [
+        poly
+        for _, poly in ceiling_patches
+        if not poly.is_empty and poly.area >= CEILING_CLOSURE_MIN_AREA_M2
+    ]
+    if not polys:
+        return []
+    union = unary_union(polys)
+    outers = (
+        [union]
+        if union.geom_type == "Polygon"
+        else [g for g in getattr(union, "geoms", []) if g.geom_type == "Polygon"]
+    )
+    seg_lines = [LineString([tuple(s.p0), tuple(s.p1)]) for s in segments]
+    virtual: list[WallSegment] = []
+    for poly in outers:
+        simplified = poly.simplify(CEILING_SIMPLIFY_M)
+        if simplified.is_empty or simplified.geom_type != "Polygon":
+            simplified = poly
+        ring = list(simplified.exterior.coords)
+        for a, b in zip(ring[:-1], ring[1:]):
+            edge = LineString([a, b])
+            if edge.length < CEILING_EDGE_MIN_LENGTH_M:
+                continue
+            buf = edge.buffer(CEILING_EDGE_WALL_TOL_M)
+            covered = sum(line.intersection(buf).length for line in seg_lines)
+            if covered >= CEILING_EDGE_COVERED_FRACTION * edge.length:
+                continue
+            virtual.append(
+                WallSegment(
+                    p0=np.asarray(a, dtype=np.float64),
+                    p1=np.asarray(b, dtype=np.float64),
+                    thickness=None,
+                    plane_ids=[],
+                    weight=1.0,
+                    virtual=True,
+                )
+            )
+    return virtual
+
+
 def polygonize_rooms(segments: list[WallSegment]) -> list[Polygon]:
     """Extend segments to close corner gaps, node the network, polygonize."""
     lines = []
@@ -443,11 +504,6 @@ def build_rooms(
     review: list[dict[str, Any]] = []
 
     for st in storeys:
-        segments = close_dangling_ends(
-            merge_segments(wall_segments(storey_walls(planes, st)))
-        )
-        faces = polygonize_rooms(segments)
-
         lo, hi = st.floor_span[0] - 0.15, st.floor_span[1] + 0.15
         floor_patches = [
             (p, _poly_from_plane(p))
@@ -465,6 +521,11 @@ def build_rooms(
             < p["elevation_y"]
             < st.floor_y + CEILING_MAX_ABOVE_M
         ]
+        segments = merge_segments(wall_segments(storey_walls(planes, st)))
+        segments.extend(ceiling_closure_segments(ceiling_patches, segments))
+        segments = close_dangling_ends(segments)
+        faces = polygonize_rooms(segments)
+
         floor_union = unary_union([poly for _, poly in floor_patches])
         sweep_pts = [
             (idx, Point(float(pos[0]), float(pos[2])))
@@ -667,11 +728,12 @@ def render_review(review: list[dict[str, Any]], out_dir: Path, size_px: int = 16
                 cv2.polylines(image, [pts], True, (110, 110, 110), 1)
         for s in item["segments"]:
             th = max(2, int(round((s.thickness or 0.06) * scale)))
+            colour = (0, 165, 255) if s.virtual else (255, 255, 255)
             cv2.line(
                 image,
                 px(float(s.p0[0]), float(s.p0[1])),
                 px(float(s.p1[0]), float(s.p1[1])),
-                (255, 255, 255),
+                colour,
                 th,
             )
         for idx, pt in item["sweep_pts"]:
