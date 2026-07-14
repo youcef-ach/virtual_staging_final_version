@@ -514,6 +514,21 @@ def _palette(index: int) -> tuple[int, int, int]:
     return int(c[0]), int(c[1]), int(c[2])
 
 
+def _exterior_rings(geom: Any) -> list[Any]:
+    """Exterior rings of a Polygon or MultiPolygon (render helper).
+
+    _poly_from_plane repairs invalid boundaries with buffer(0), which can
+    legally return a MultiPolygon (pinched/self-crossing terrain patches).
+    """
+    if geom.is_empty:
+        return []
+    if geom.geom_type == "Polygon":
+        return [geom.exterior]
+    if geom.geom_type == "MultiPolygon":
+        return [g.exterior for g in geom.geoms]
+    return []
+
+
 def render_review(review: list[dict[str, Any]], out_dir: Path, size_px: int = 1600) -> None:
     """Per-storey 2D plan render: walls, room polygons, exteriors, sweeps."""
     for item in review:
@@ -544,16 +559,18 @@ def render_review(review: list[dict[str, Any]], out_dir: Path, size_px: int = 16
         image = np.zeros((height, width, 3), dtype=np.uint8)
         overlay = image.copy()
         for k, (room_id, face) in enumerate(item["rooms"]):
-            pts = np.array(
-                [px(x, z) for x, z in face.exterior.coords], dtype=np.int32
-            )
-            cv2.fillPoly(overlay, [pts], _palette(k))
+            for ring in _exterior_rings(face):
+                pts = np.array(
+                    [px(x, z) for x, z in ring.coords], dtype=np.int32
+                )
+                cv2.fillPoly(overlay, [pts], _palette(k))
         image = cv2.addWeighted(overlay, 0.45, image, 0.55, 0)
         for poly in item["exterior_polys"]:
-            pts = np.array(
-                [px(x, z) for x, z in poly.exterior.coords], dtype=np.int32
-            )
-            cv2.polylines(image, [pts], True, (110, 110, 110), 1)
+            for ring in _exterior_rings(poly):
+                pts = np.array(
+                    [px(x, z) for x, z in ring.coords], dtype=np.int32
+                )
+                cv2.polylines(image, [pts], True, (110, 110, 110), 1)
         for s in item["segments"]:
             th = max(2, int(round((s.thickness or 0.06) * scale)))
             cv2.line(
