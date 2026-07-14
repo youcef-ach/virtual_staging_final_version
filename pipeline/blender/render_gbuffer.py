@@ -46,7 +46,25 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--details", type=Path, default=None)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--limit", type=int, default=0)
+    parser.add_argument(
+        "--sweeps",
+        type=str,
+        default=None,
+        help='sweep index selection, e.g. "50" or "50,58-61,175"',
+    )
     return parser.parse_args(argv)
+
+
+def parse_sweep_spec(spec: str) -> set[int]:
+    wanted: set[int] = set()
+    for part in spec.split(","):
+        part = part.strip()
+        if "-" in part:
+            lo, hi = part.split("-")
+            wanted.update(range(int(lo), int(hi) + 1))
+        elif part:
+            wanted.add(int(part))
+    return wanted
 
 
 def setup_scene(size: int):
@@ -165,6 +183,10 @@ def main() -> None:
 
     out_root = Path(args.out).resolve()
     sweeps = jobs["sweeps"]
+    if args.sweeps:
+        wanted = parse_sweep_spec(args.sweeps)
+        sweeps = [s for s in sweeps if int(s.get("index", -1)) in wanted]
+        print(f"sweep selection: {sorted(wanted)} -> {len(sweeps)} job(s)")
     if args.limit and args.limit > 0:
         sweeps = sweeps[: args.limit]
     out_root.mkdir(parents=True, exist_ok=True)
