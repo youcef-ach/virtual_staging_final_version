@@ -649,9 +649,20 @@ def render_review(review: list[dict[str, Any]], out_dir: Path, size_px: int = 16
                 (255, 255, 255),
                 th,
             )
-        for _, pt in item["sweep_pts"]:
+        for idx, pt in item["sweep_pts"]:
+            u, v = px(pt.x, pt.y)
             cv2.drawMarker(
-                image, px(pt.x, pt.y), (0, 220, 255), cv2.MARKER_CROSS, 12, 2
+                image, (u, v), (0, 220, 255), cv2.MARKER_CROSS, 12, 2
+            )
+            cv2.putText(
+                image,
+                str(idx),
+                (u + 8, v - 6),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.38,
+                (0, 220, 255),
+                1,
+                cv2.LINE_AA,
             )
         for k, (room_id, face) in enumerate(item["rooms"]):
             c = face.representative_point()
