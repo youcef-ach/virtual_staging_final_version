@@ -36,8 +36,15 @@ complexity.
 Glass-heavy rooms have almost no wall inliers (two rooms produced no room
 polygon at all: sweeps 58–61 storey 1, sweep 175 storey 2). Mirrors/windows
 also caused most Gate-1 pose-QA review flags (47/198, all content-driven).
-Current mitigations: ceiling-outline closure (#12), two-signal QA flagging.
+Current mitigations: closure tooling (#8), two-signal QA flagging.
 No detection/removal of glass artifacts at the point-cloud level.
+NEW OBSERVATION (2026-07-12): mirrors also INJECT geometry — the S2
+bathroom (two mirrors + glass window) produced short DIAGONAL phantom
+wall stubs (reflected returns fitted as planes at bogus angles) that
+initially mimicked stairwell geometry and locally corrupt the wall-line
+graph. Mirror-artifact detection would clean both G2 candidates and the
+room graph. Search: “mirror artifact removal laser scanning indoor”,
+“specular reflection point cloud phantom geometry”.
 - Research: “glass detection terrestrial laser scanning”, “specular/mirror
   artifact removal LiDAR indoor”, “transparent surface reconstruction”;
   also G6 (Mask2Former window class) can feed masks back into Gate 1 and G2.
