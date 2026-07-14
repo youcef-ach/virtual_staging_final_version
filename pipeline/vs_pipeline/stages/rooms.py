@@ -39,7 +39,7 @@ import numpy as np
 from shapely.geometry import LineString, MultiLineString, Point, Polygon
 from shapely.ops import polygonize, unary_union
 
-ROOMS_SCHEMA_VERSION = 1
+ROOMS_SCHEMA_VERSION = 2
 
 #: Storey detection (same rule family as G2 storey levels v3).
 STOREY_BIN_GAP_M = 0.3
@@ -75,6 +75,10 @@ EXTERIOR_INSIDE_MAX = 0.3
 #: Wall election: min shared length with the (buffered) room boundary.
 WALL_ELECT_BUFFER_M = 0.15
 WALL_ELECT_MIN_LENGTH_M = 0.4
+#: Exported room outlines are simplified and annotated per edge for the
+#: shell stage (interior-face offsetting needs per-edge wall thickness).
+POLYGON_SIMPLIFY_M = 0.02
+EDGE_MATCH_MAX_DIST_M = 0.3
 
 
 @dataclass
@@ -494,6 +498,27 @@ def build_rooms(
                 line = LineString([tuple(s.p0), tuple(s.p1)])
                 if line.intersection(ring_buf).length >= WALL_ELECT_MIN_LENGTH_M:
                     wall_ids.extend(s.plane_ids)
+            outline = face.simplify(POLYGON_SIMPLIFY_M)
+            if outline.is_empty or outline.geom_type != "Polygon":
+                outline = face
+            coords = list(outline.exterior.coords)
+            edges: list[dict[str, Any]] = []
+            for a, b in zip(coords[:-1], coords[1:]):
+                mid = Point((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0)
+                best: WallSegment | None = None
+                best_d = EDGE_MATCH_MAX_DIST_M
+                for s in segments:
+                    dist = LineString([tuple(s.p0), tuple(s.p1)]).distance(mid)
+                    if dist < best_d:
+                        best_d, best = dist, s
+                edges.append(
+                    {
+                        "p0": [round(float(a[0]), 4), round(float(a[1]), 4)],
+                        "p1": [round(float(b[0]), 4), round(float(b[1]), 4)],
+                        "thickness_m": best.thickness if best else None,
+                        "wall_planes": best.plane_ids if best else [],
+                    }
+                )
             room_id = f"s{st.storey_id}_room_{len(accepted):02d}"
             rooms_payload.append(
                 {
@@ -501,9 +526,9 @@ def build_rooms(
                     "storey_id": st.storey_id,
                     "area_m2": round(face.area, 3),
                     "polygon_plan": [
-                        [round(float(x), 4), round(float(z), 4)]
-                        for x, z in face.exterior.coords
+                        [round(float(x), 4), round(float(z), 4)] for x, z in coords
                     ],
+                    "edges": edges,
                     "floor_plane": floor_plane["plane_id"] if floor_plane else None,
                     "floor_elevation_y": (
                         floor_plane["elevation_y"] if floor_plane else None
