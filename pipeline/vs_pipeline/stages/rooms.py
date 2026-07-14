@@ -87,6 +87,9 @@ CEILING_SIMPLIFY_M = 0.15
 CEILING_EDGE_MIN_LENGTH_M = 0.5
 CEILING_EDGE_WALL_TOL_M = 0.3
 CEILING_EDGE_COVERED_FRACTION = 0.6
+#: Closure is need-driven: virtual segments are only kept near ORPHAN
+#: sweeps (in no polygonized face AND under the ceiling union).
+ORPHAN_RADIUS_M = 6.0
 
 
 @dataclass
@@ -558,14 +561,9 @@ def build_rooms(
             < p["elevation_y"]
             < st.floor_y + CEILING_MAX_ABOVE_M
         ]
-        segments = merge_segments(wall_segments(storey_walls(planes, st)))
-        virtual_segments = ceiling_closure_segments(ceiling_patches, segments)
-        print(
-            f"storey {st.storey_id}: {len(virtual_segments)} "
-            "ceiling-closure segment(s)"
+        segments = close_dangling_ends(
+            merge_segments(wall_segments(storey_walls(planes, st)))
         )
-        segments.extend(virtual_segments)
-        segments = close_dangling_ends(segments)
         faces = polygonize_rooms(segments)
 
         floor_union = unary_union([poly for _, poly in floor_patches])
@@ -574,6 +572,45 @@ def build_rooms(
             for idx, pos in sweeps
             if idx in set(st.sweep_indices)
         ]
+
+        # Need-driven ceiling-outline closure: only sweeps housed in NO face
+        # AND standing under the ceiling union mark unclosed interior rooms
+        # (glass walls). Open-sky garden sweeps never qualify, so eave/soffit
+        # outlines cannot spawn virtual walls far from any real void.
+        ceiling_union = unary_union(
+            [
+                poly
+                for _, poly in ceiling_patches
+                if not poly.is_empty and poly.area >= CEILING_CLOSURE_MIN_AREA_M2
+            ]
+        )
+        orphans = [
+            pt
+            for _, pt in sweep_pts
+            if not any(f.contains(pt) for f in faces)
+            and not ceiling_union.is_empty
+            and ceiling_union.covers(pt)
+        ]
+        virtual_used = 0
+        if orphans:
+            candidates = ceiling_closure_segments(ceiling_patches, segments)
+            near = [
+                s
+                for s in candidates
+                if min(
+                    LineString([tuple(s.p0), tuple(s.p1)]).distance(pt)
+                    for pt in orphans
+                )
+                <= ORPHAN_RADIUS_M
+            ]
+            if near:
+                segments = close_dangling_ends(segments + near)
+                faces = polygonize_rooms(segments)
+            virtual_used = len(near)
+        print(
+            f"storey {st.storey_id}: {len(orphans)} orphan sweep(s), "
+            f"{virtual_used} ceiling-closure segment(s) used"
+        )
 
         accepted: list[tuple[str, Polygon]] = []
         for face in sorted(faces, key=lambda f: -f.area):
