@@ -1,0 +1,8 @@
+{
+  "walls": [
+    {"storey": 1, "p0": [-25.5, -4.5], "p1": [-25.5, 1.5], "note": "kitchen east glass wall"},
+    {"storey": 1, "p0": [-27.0, 1.5], "p1": [-25.5, 1.5], "note": "kitchen south passage divider"},
+    {"storey": 2, "p0": [-16.8, -3.0], "p1": [-16.8, 0.0], "note": "S2 east room glass wall (sweep 175)"},
+    {"storey": 2, "p0": [-26.1, -2.2], "p1": [-24.4, -1.8], "note": "S2 zone above kitchen (sweeps 152-158): suspected stairwell/landing, closure ineffective by design if open to below -- pano verification pending"}
+  ]
+}
