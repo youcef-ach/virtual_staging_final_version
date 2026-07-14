@@ -99,6 +99,8 @@ OVERHEAD_NY = 0.92
 #: Floor-evidence orphans must be wall-adjacent (keeps the open yard out).
 ORPHAN_WALL_RADIUS_M = 3.5
 ORPHAN_MIN_NEAR_WALLS = 2
+#: Manual --close-file wall endpoints snap to nearby real wall geometry.
+MANUAL_SNAP_M = 0.6
 
 
 @dataclass
@@ -584,13 +586,37 @@ def build_rooms(
     for st in storeys:
         floor_patches, ceiling_patches = _storey_patches(planes, st)
         segments = merge_segments(wall_segments(storey_walls(planes, st)))
+        real_lines = [LineString([tuple(s.p0), tuple(s.p1)]) for s in segments]
+        real_endpoints = [q for s in segments for q in (s.p0, s.p1)]
+
+        def _snap(p: np.ndarray) -> np.ndarray:
+            best: np.ndarray | None = None
+            best_d = MANUAL_SNAP_M
+            for q in real_endpoints:
+                d = float(np.hypot(q[0] - p[0], q[1] - p[1]))
+                if d < best_d:
+                    best_d, best = d, np.asarray(q, dtype=np.float64)
+            if best is not None:
+                return best
+            pt = Point(float(p[0]), float(p[1]))
+            best_line = None
+            best_d = MANUAL_SNAP_M
+            for line in real_lines:
+                d = float(line.distance(pt))
+                if d < best_d:
+                    best_d, best_line = d, line
+            if best_line is not None:
+                q = best_line.interpolate(best_line.project(pt))
+                return np.array([q.x, q.y], dtype=np.float64)
+            return np.asarray(p, dtype=np.float64)
+
         for w in manual_walls or []:
             if w.get("storey") is not None and int(w["storey"]) != st.storey_id:
                 continue
             segments.append(
                 WallSegment(
-                    p0=np.asarray(w["p0"], dtype=np.float64),
-                    p1=np.asarray(w["p1"], dtype=np.float64),
+                    p0=_snap(np.asarray(w["p0"], dtype=np.float64)),
+                    p1=_snap(np.asarray(w["p1"], dtype=np.float64)),
                     thickness=w.get("thickness_m"),
                     plane_ids=[],
                     weight=1.0,
@@ -1024,6 +1050,8 @@ def probe_sweeps(
             ids = ",".join(s.plane_ids[:3]) or "-"
             print(
                 f"    d {dist:5.2f} m  len {length:5.2f} m  "
+                f"({s.p0[0]:+7.2f},{s.p0[1]:+7.2f})->"
+                f"({s.p1[0]:+7.2f},{s.p1[1]:+7.2f})  "
                 f"th {s.thickness}  {ids}"
             )
         virtual = ceiling_closure_segments(ceiling_patches, segments)
