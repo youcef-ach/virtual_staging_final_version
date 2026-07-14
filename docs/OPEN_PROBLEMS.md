@@ -189,11 +189,17 @@ is an unresolved product decision. No explicit exterior semantic class.
   trimesh cannot Draco-encode — use gltf-transform or Blender in P4 or a
   G3 finishing pass.
 
-### 14. Non-planar detail geometry missing — DEFERRED (last G3 slice)
-Stairs, kitchen counters, columns, built-ins have NO proxy geometry → no
-occlusion/collision there. Inputs ready: 2,970 residual DBSCAN clusters
-(`residual_clusters.json`) + MatterPak OBJ for clipping (Decision 6).
-Stairs matter most (storey connectivity + occlusion + T1 navigation).
+### 14. Non-planar detail geometry — MITIGATED (shipped 2026-07-12)
+`details.py` ships: 136/2,970 clusters → 100 detail proxies (27,586 tris),
+staircase captured (7.8 × 3.5 × 4.3 m). Remaining questions: (a) is the
+MatterPak-decimated silhouette fidelity ENOUGH for occlusion realism —
+gates at the G8 milestone (test object occlusion, grounded sofa); (b) the
+95.4 % cluster cut is threshold-driven (MIN_CLUSTER_POINTS 100 etc.) and
+unvalidated beyond this property; (c) possible garden-clutter leakage in
+the garage area (large boxes upper-right of storey 0 — flagged in review,
+not yet investigated); (d) detail proxies are box-clipped, not
+semantically segmented — G6 masks + 3D furniture boxes will supersede the
+selection for Year-2 room emptying.
 
 ---
 
