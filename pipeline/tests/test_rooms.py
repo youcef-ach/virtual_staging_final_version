@@ -187,6 +187,25 @@ def test_manual_wall_closes_unclosable_room():
     assert 12.0 < payload["rooms"][0]["area_m2"] < 20.0
 
 
+def test_manual_region_absorbs_phantom_slicing():
+    """A phantom wall crossing a manual rectangle must not split the room."""
+    planes = [
+        _horizontal("floor_00", "floor", 0, 0, 4, 4, 0.0),
+        # mirror phantom: diagonal wall slicing straight through the room
+        _wall("wall_70", (0.5, -0.5), (3.5, 4.5)),
+    ]
+    sweeps = _sweeps([[2, 1.4, 2], [1, 1.4, 3], [3, 1.4, 1]])
+    manual = [
+        {"storey": 0, "p0": [0.0, 0.0], "p1": [4.0, 0.0]},
+        {"storey": 0, "p0": [4.0, 0.0], "p1": [4.0, 4.0]},
+        {"storey": 0, "p0": [4.0, 4.0], "p1": [0.0, 4.0]},
+        {"storey": 0, "p0": [0.0, 4.0], "p1": [0.0, 0.0]},
+    ]
+    payload, _ = build_rooms(planes, sweeps, manual_walls=manual)
+    assert len(payload["rooms"]) == 1
+    assert 12.0 < payload["rooms"][0]["area_m2"] < 20.0
+
+
 def test_sliver_between_opposing_faces_rejected():
     """A 0.5 m wedge between unpaired opposing wall faces is not a room."""
     planes = _two_room_planes() + [

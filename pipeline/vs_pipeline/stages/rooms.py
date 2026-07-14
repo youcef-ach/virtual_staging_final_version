@@ -610,19 +610,20 @@ def build_rooms(
                 return np.array([q.x, q.y], dtype=np.float64)
             return np.asarray(p, dtype=np.float64)
 
+        manual_segs: list[WallSegment] = []
         for w in manual_walls or []:
             if w.get("storey") is not None and int(w["storey"]) != st.storey_id:
                 continue
-            segments.append(
-                WallSegment(
-                    p0=_snap(np.asarray(w["p0"], dtype=np.float64)),
-                    p1=_snap(np.asarray(w["p1"], dtype=np.float64)),
-                    thickness=w.get("thickness_m"),
-                    plane_ids=[],
-                    weight=1.0,
-                    virtual=True,
-                )
+            seg = WallSegment(
+                p0=_snap(np.asarray(w["p0"], dtype=np.float64)),
+                p1=_snap(np.asarray(w["p1"], dtype=np.float64)),
+                thickness=w.get("thickness_m"),
+                plane_ids=[],
+                weight=1.0,
+                virtual=True,
             )
+            manual_segs.append(seg)
+            segments.append(seg)
         segments = close_dangling_ends(segments)
         faces = polygonize_rooms(segments)
 
@@ -695,6 +696,37 @@ def build_rooms(
             f"storey {st.storey_id}: {len(orphans)} orphan sweep(s), "
             f"{virtual_used} ceiling-closure segment(s) used"
         )
+
+        # Manual walls forming a closed loop define a manual REGION: faces
+        # inside it are unioned into one before acceptance, so phantom
+        # segments (mirror artifacts) slicing the region cannot shatter the
+        # operator's room into unacceptable shards.
+        if manual_segs:
+            for region in polygonize_rooms(manual_segs):
+                if region.area < MIN_ROOM_AREA_M2:
+                    continue
+                core = region.buffer(0.05)
+                group = [
+                    f for f in faces if core.covers(f.representative_point())
+                ]
+                if len(group) < 2:
+                    continue
+                blob = unary_union(group)
+                if blob.geom_type != "Polygon":
+                    polys = [
+                        g
+                        for g in getattr(blob, "geoms", [])
+                        if g.geom_type == "Polygon"
+                    ]
+                    if not polys:
+                        continue
+                    blob = max(polys, key=lambda g: g.area)
+                group_ids = {id(f) for f in group}
+                faces = [f for f in faces if id(f) not in group_ids] + [blob]
+                print(
+                    f"storey {st.storey_id}: merged {len(group)} face(s) "
+                    "inside a manual closure region"
+                )
 
         accepted: list[tuple[str, Polygon]] = []
         for face in sorted(faces, key=lambda f: -f.area):
