@@ -205,6 +205,19 @@ selection for Year-2 room emptying.
 
 ## Upstream/platform items parked earlier
 
+### 14b. G4 follow-ups — OPEN (non-blocking, logged 2026-07-12)
+- Detail proxies can ENCLOSE sweep positions: sweep 50's G-buffer shows
+  0.04 m depth medians on two faces — a residual-cluster box (furniture
+  group) likely swallowed the camera. At runtime this corrupts occlusion
+  for that sweep. Fix path: details.py containment check (shrink/split
+  boxes that contain a sweep position, or carve a clearance sphere).
+- Full-property 2048² G-buffer bake not yet run (validated at 1024² on
+  3 sweeps; renderer is resumable — background run, hours).
+- KTX2 packing (toktx) deferred to P4 alongside Draco.
+- Alignment score absolute values are low (+0.04 mean) by nature (smooth
+  proxy = few edges); composites are the gate, the score is only a trend
+  indicator — revisit if a quantitative proxy-QA gate is ever needed.
+
 ### 15. F6 dashboard — property list + pipeline stage status need backend
 wiring (F6.1); F6.3 micro-adjust sliders deferred until a genuinely drifted
 pose ever appears (zero evidence to date).
