@@ -88,8 +88,11 @@ CEILING_EDGE_MIN_LENGTH_M = 0.5
 CEILING_EDGE_WALL_TOL_M = 0.3
 CEILING_EDGE_COVERED_FRACTION = 0.6
 #: Closure is need-driven: virtual segments are only kept near ORPHAN
-#: sweeps (in no polygonized face AND under the ceiling union).
+#: sweeps (in no ACCEPTED-quality face AND under the ceiling union).
 ORPHAN_RADIUS_M = 6.0
+#: Near orphans, dangling wall ends may extend further: wall lines
+#: physically continue across windows (sill below, lintel above).
+DANGLE_ORPHAN_EXTEND_M = 4.0
 
 
 @dataclass
@@ -241,7 +244,9 @@ def merge_segments(segments: list[WallSegment]) -> list[WallSegment]:
     return merged
 
 
-def close_dangling_ends(segments: list[WallSegment]) -> list[WallSegment]:
+def close_dangling_ends(
+    segments: list[WallSegment], orphan_pts: list[Point] | None = None
+) -> list[WallSegment]:
     """Extend dangling segment ends to the nearest wall line (doorway seal).
 
     Doorway openings interrupt wall inliers, but the wall physically
@@ -249,6 +254,8 @@ def close_dangling_ends(segments: list[WallSegment]) -> list[WallSegment]:
     through the opening for room polygonization. An endpoint is dangling
     when no other segment passes within DANGLE_TOUCH_TOL_M; a ray cast
     outward extends it to the first wall hit within DANGLE_MAX_EXTEND_M.
+    Near orphan sweeps (unclosed glass rooms) the limit is raised to
+    DANGLE_ORPHAN_EXTEND_M: walls continue across windows too.
     """
     lines = [LineString([tuple(s.p0), tuple(s.p1)]) for s in segments]
     out: list[WallSegment] = []
@@ -265,10 +272,16 @@ def close_dangling_ends(segments: list[WallSegment]) -> list[WallSegment]:
             )
             if touching:
                 continue
+            max_extend = DANGLE_MAX_EXTEND_M
+            if orphan_pts and any(
+                float(np.hypot(pt.x - p[0], pt.y - p[1])) <= ORPHAN_RADIUS_M
+                for pt in orphan_pts
+            ):
+                max_extend = DANGLE_ORPHAN_EXTEND_M
             ray = LineString(
                 [
                     tuple(p + outward * 0.01),
-                    tuple(p + outward * DANGLE_MAX_EXTEND_M),
+                    tuple(p + outward * max_extend),
                 ]
             )
             best: float | None = None
@@ -573,10 +586,26 @@ def build_rooms(
             if idx in set(st.sweep_indices)
         ]
 
-        # Need-driven ceiling-outline closure: only sweeps housed in NO face
-        # AND standing under the ceiling union mark unclosed interior rooms
-        # (glass walls). Open-sky garden sweeps never qualify, so eave/soffit
-        # outlines cannot spawn virtual walls far from any real void.
+        # Need-driven closure: an orphan sweep sits in no ACCEPTED-quality
+        # face AND under the ceiling union (open-sky garden sweeps never
+        # qualify). Around orphans, real wall stubs may dangle-extend up to
+        # 4 m (walls continue across windows); ceiling-outline virtual walls
+        # are the secondary source, same scoping.
+        def _face_is_room(face: Polygon) -> bool:
+            if face.area < MIN_ROOM_AREA_M2:
+                return False
+            if face.buffer(-MIN_ROOM_WIDTH_M / 2).is_empty:
+                return False
+            cover = (
+                face.intersection(floor_union).area / face.area
+                if not floor_union.is_empty
+                else 0.0
+            )
+            if cover >= MIN_FLOOR_COVER:
+                return True
+            inside = any(face.contains(pt) for _, pt in sweep_pts)
+            return inside and cover >= MIN_FLOOR_COVER_SWEPT
+
         ceiling_union = unary_union(
             [
                 poly
@@ -584,10 +613,11 @@ def build_rooms(
                 if not poly.is_empty and poly.area >= CEILING_CLOSURE_MIN_AREA_M2
             ]
         )
+        housed = [f for f in faces if _face_is_room(f)]
         orphans = [
             pt
             for _, pt in sweep_pts
-            if not any(f.contains(pt) for f in faces)
+            if not any(f.contains(pt) for f in housed)
             and not ceiling_union.is_empty
             and ceiling_union.covers(pt)
         ]
@@ -603,10 +633,9 @@ def build_rooms(
                 )
                 <= ORPHAN_RADIUS_M
             ]
-            if near:
-                segments = close_dangling_ends(segments + near)
-                faces = polygonize_rooms(segments)
             virtual_used = len(near)
+            segments = close_dangling_ends(segments + near, orphan_pts=orphans)
+            faces = polygonize_rooms(segments)
         print(
             f"storey {st.storey_id}: {len(orphans)} orphan sweep(s), "
             f"{virtual_used} ceiling-closure segment(s) used"

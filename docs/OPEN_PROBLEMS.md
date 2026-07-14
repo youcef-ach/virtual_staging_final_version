@@ -97,11 +97,21 @@ residual downsampling knob, or parallelism.
 ## G3 — Rooms & proxy (`rooms.py`, `openings.py`, `proxy.py`)
 
 ### 8. Two glass rooms unclosed — OPEN (fix in flight)
-Ceiling-outline closure v1 produced zero virtual walls (double-counted
-coverage + sawtooth union boundary vs 5 cm simplify). v2 (interval-union
-coverage, 0.15 m simplify, diagnostic counts) committed, **re-run pending**.
-If v2 under/over-triggers, knobs: `CEILING_EDGE_COVERED_FRACTION` (0.6),
-`CEILING_EDGE_WALL_TOL_M` (0.3), `CEILING_SIMPLIFY_M` (0.15).
+Closure history: v1 zero virtual walls (double-counted coverage + sawtooth
+union boundary vs 5 cm simplify); v2 over-triggered 104 segments (ceiling
+union includes eaves/porch soffits; boundary sits at the EAVE line, not the
+facade); v3 need-driven (orphan sweeps) built a porch room but missed both
+voids — orphan test wrongly counted unaccepted faces as housing, and
+eave-line virtual walls are simply in the wrong place for facade glass.
+v4 (pending validation): orphan test vs ACCEPTED-quality faces + orphan-
+scoped dangle extension to 4 m using real wall stubs (sills/lintels
+continue across windows) with ceiling outline as secondary source.
+Open question worth investigating with the wall candidates directly
+(`planes_review_topdown_walls.png`, `structural_planes.json` near the
+voids): why are the sill/lintel wall planes around these glass rooms so
+fragmented that gaps exceed 1.2 m? Knobs: `CEILING_EDGE_COVERED_FRACTION`
+(0.6), `CEILING_EDGE_WALL_TOL_M` (0.3), `CEILING_SIMPLIFY_M` (0.15),
+`DANGLE_ORPHAN_EXTEND_M` (4.0), `ORPHAN_RADIUS_M` (6.0).
 - Research: Floor-SP, RoomFormer, HEAT (holistic edge attention
   transformer), “floorplan reconstruction from point clouds”, PolyFit —
   as alternatives or validators for the whole wall-graph→polygonize chain.
