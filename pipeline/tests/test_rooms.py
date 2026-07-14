@@ -150,3 +150,32 @@ def test_paired_walls_collapse_to_centerline_with_thickness():
     # centerline sits midway between the faces
     assert abs(float(segs[0].p0[1]) - 0.1) < 0.02
     assert abs(float(segs[0].p1[1]) - 0.1) < 0.02
+
+
+def test_doorway_gap_closed_by_dangling_extension():
+    """A 0.8 m doorway gap in one wall must not break the room."""
+    planes = [
+        _wall("wall_30", (0, 0), (1.6, 0)),
+        _wall("wall_31", (2.4, 0), (4, 0)),  # 0.8 m doorway between them
+        _wall("wall_32", (4, 0), (4, 4)),
+        _wall("wall_33", (4, 4), (0, 4)),
+        _wall("wall_34", (0, 4), (0, 0)),
+        _horizontal("floor_00", "floor", 0, 0, 4, 4, 0.0),
+        _horizontal("ceiling_00", "ceiling", 0, 0, 4, 4, 2.7),
+    ]
+    sweeps = _sweeps([[2, 1.4, 2], [1, 1.4, 1], [3, 1.4, 3]])
+    payload, _ = build_rooms(planes, sweeps)
+    assert len(payload["rooms"]) == 1
+    assert 12.0 < payload["rooms"][0]["area_m2"] < 20.0
+
+
+def test_sliver_between_opposing_faces_rejected():
+    """A 0.5 m wedge between unpaired opposing wall faces is not a room."""
+    planes = _two_room_planes() + [
+        _wall("wall_40", (4.5, 0), (4.5, 4))  # opposing face of the divider
+    ]
+    sweeps = _sweeps(
+        [[2, 1.4, 2], [2.5, 1.4, 1.5], [6, 1.4, 2], [6.5, 1.4, 2.5]]
+    )
+    payload, _ = build_rooms(planes, sweeps)
+    assert len(payload["rooms"]) == 2  # sliver face (0.5 x 4 m) dropped

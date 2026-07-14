@@ -60,8 +60,14 @@ SEG_MERGE_GAP_M = 0.3
 MIN_SEGMENT_LENGTH_M = 0.3
 #: Segment ends are extended to close corner gaps before polygonization.
 SNAP_EXTEND_M = 0.3
+#: Dangling wall ends (doorways interrupt wall inliers) are extended toward
+#: the nearest wall line, up to a doorway-sized distance.
+DANGLE_TOUCH_TOL_M = 0.35
+DANGLE_MAX_EXTEND_M = 1.2
 #: Room acceptance.
 MIN_ROOM_AREA_M2 = 1.5
+#: Faces narrower than this are slivers (unpaired opposing faces), not rooms.
+MIN_ROOM_WIDTH_M = 0.6
 MIN_FLOOR_COVER = 0.3
 MIN_FLOOR_COVER_SWEPT = 0.1
 #: Floor patches with less of their area inside rooms are exterior ground.
@@ -219,6 +225,65 @@ def merge_segments(segments: list[WallSegment]) -> list[WallSegment]:
     return merged
 
 
+def close_dangling_ends(segments: list[WallSegment]) -> list[WallSegment]:
+    """Extend dangling segment ends to the nearest wall line (doorway seal).
+
+    Doorway openings interrupt wall inliers, but the wall physically
+    continues above the door (lintel), so the wall LINE must continue
+    through the opening for room polygonization. An endpoint is dangling
+    when no other segment passes within DANGLE_TOUCH_TOL_M; a ray cast
+    outward extends it to the first wall hit within DANGLE_MAX_EXTEND_M.
+    """
+    lines = [LineString([tuple(s.p0), tuple(s.p1)]) for s in segments]
+    out: list[WallSegment] = []
+    for i, s in enumerate(segments):
+        p0, p1 = s.p0.copy(), s.p1.copy()
+        d = _seg_dir(s)
+        for end in (0, 1):
+            p = p0 if end == 0 else p1
+            outward = -d if end == 0 else d
+            touching = any(
+                j != i
+                and lines[j].distance(Point(tuple(p))) <= DANGLE_TOUCH_TOL_M
+                for j in range(len(lines))
+            )
+            if touching:
+                continue
+            ray = LineString(
+                [
+                    tuple(p + outward * 0.01),
+                    tuple(p + outward * DANGLE_MAX_EXTEND_M),
+                ]
+            )
+            best: float | None = None
+            for j in range(len(lines)):
+                if j == i:
+                    continue
+                inter = ray.intersection(lines[j])
+                if inter.is_empty:
+                    continue
+                for g in getattr(inter, "geoms", [inter]):
+                    for q in getattr(g, "coords", []):
+                        t = float(np.hypot(q[0] - p[0], q[1] - p[1]))
+                        if best is None or t < best:
+                            best = t
+            if best is not None:
+                if end == 0:
+                    p0 = p0 + outward * (best + 0.02)
+                else:
+                    p1 = p1 + outward * (best + 0.02)
+        out.append(
+            WallSegment(
+                p0=p0,
+                p1=p1,
+                thickness=s.thickness,
+                plane_ids=s.plane_ids,
+                weight=s.weight,
+            )
+        )
+    return out
+
+
 def polygonize_rooms(segments: list[WallSegment]) -> list[Polygon]:
     """Extend segments to close corner gaps, node the network, polygonize."""
     lines = []
@@ -374,7 +439,9 @@ def build_rooms(
     review: list[dict[str, Any]] = []
 
     for st in storeys:
-        segments = merge_segments(wall_segments(storey_walls(planes, st)))
+        segments = close_dangling_ends(
+            merge_segments(wall_segments(storey_walls(planes, st)))
+        )
         faces = polygonize_rooms(segments)
 
         lo, hi = st.floor_span[0] - 0.15, st.floor_span[1] + 0.15
@@ -405,6 +472,8 @@ def build_rooms(
         for face in sorted(faces, key=lambda f: -f.area):
             if face.area < MIN_ROOM_AREA_M2:
                 continue
+            if face.buffer(-MIN_ROOM_WIDTH_M / 2).is_empty:
+                continue  # sliver between unpaired opposing wall faces
             cover = (
                 face.intersection(floor_union).area / face.area
                 if not floor_union.is_empty
