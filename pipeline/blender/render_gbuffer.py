@@ -110,6 +110,23 @@ def main() -> None:
     if args.details is not None and Path(args.details).is_file():
         import_glb(Path(args.details))
 
+    # Frame-lock sanity: cameras must sit INSIDE the imported proxy bounds.
+    mins = [1e12, 1e12, 1e12]
+    maxs = [-1e12, -1e12, -1e12]
+    for obj in bpy.context.scene.objects:
+        if obj.type != "MESH":
+            continue
+        for corner in obj.bound_box:
+            world = obj.matrix_world @ Matrix.Translation(corner).to_translation()
+            for i in range(3):
+                mins[i] = min(mins[i], world[i])
+                maxs[i] = max(maxs[i], world[i])
+    print(
+        f"proxy bounds (Blender frame): "
+        f"({mins[0]:+.2f},{mins[1]:+.2f},{mins[2]:+.2f}) .. "
+        f"({maxs[0]:+.2f},{maxs[1]:+.2f},{maxs[2]:+.2f})"
+    )
+
     sweeps = jobs["sweeps"]
     if args.limit is not None:
         sweeps = sweeps[: args.limit]
@@ -119,6 +136,16 @@ def main() -> None:
 
     for entry in sweeps:
         sweep = entry["sweep_uuid"]
+        first_face = next(iter(entry["faces"].values()))
+        cx, cy, cz = first_face[0][3], first_face[1][3], first_face[2][3]
+        inside = all(
+            mins[i] - 1.0 <= v <= maxs[i] + 1.0
+            for i, v in enumerate((cx, cy, cz))
+        )
+        print(
+            f"[{sweep}] camera ({cx:+.2f},{cy:+.2f},{cz:+.2f}) "
+            f"{'INSIDE' if inside else 'OUTSIDE'} proxy bounds"
+        )
         sweep_dir = args.out / sweep
         targets = [
             (face, sweep_dir / f"{face}_depth.exr", sweep_dir / f"{face}_normal.exr")

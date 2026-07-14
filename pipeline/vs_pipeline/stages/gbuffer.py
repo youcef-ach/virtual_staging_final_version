@@ -78,12 +78,59 @@ def prepare(poses_path: Path, output_path: Path, size: int) -> int:
 
 
 def _load_depth(path: Path) -> np.ndarray | None:
+    """Load a depth map: EXR via cv2, imageio fallback, or a .npy sibling.
+
+    Windows opencv-python builds frequently ship without OpenEXR support;
+    the renderer may therefore also dump .npy siblings (first-class here,
+    not a local patch).
+    """
+    npy = path.with_suffix(".npy")
+    if npy.is_file():
+        arr = np.load(str(npy))
+        if arr.ndim == 3:
+            arr = arr[..., 0]
+        return np.asarray(arr, dtype=np.float64)
     img = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
+    if img is None:
+        try:
+            import imageio.v3 as iio
+
+            img = iio.imread(str(path))
+        except BaseException:
+            return None
     if img is None:
         return None
     if img.ndim == 3:
         img = img[..., 0]
     return np.asarray(img, dtype=np.float64)
+
+
+def stats(renders_dir: Path, limit: int | None = None) -> None:
+    """Per-face depth statistics: separates empty renders (frame problem)
+    from broken visualization/conversion (healthy 1.5-4 m interiors)."""
+    sweep_dirs = sorted(d for d in renders_dir.iterdir() if d.is_dir())
+    if limit is not None:
+        sweep_dirs = sweep_dirs[:limit]
+    for sweep_dir in sweep_dirs:
+        print(f"[{sweep_dir.name}]")
+        for depth_path in sorted(sweep_dir.glob("*_depth.*")):
+            if depth_path.suffix == ".npy":
+                continue  # sibling of the exr; loaded via _load_depth
+            depth = _load_depth(depth_path)
+            if depth is None:
+                print(f"  {depth_path.name:<20} UNREADABLE")
+                continue
+            finite = np.isfinite(depth) & (depth > 0) & (depth < 1e6)
+            frac = float(finite.mean())
+            if frac == 0.0:
+                print(f"  {depth_path.name:<20} EMPTY (0% hits)")
+                continue
+            d = depth[finite]
+            print(
+                f"  {depth_path.name:<20} hits {frac:5.1%}  "
+                f"min {d.min():6.2f}  med {np.median(d):6.2f}  "
+                f"max {d.max():8.2f} m"
+            )
 
 
 def _depth_vis(depth: np.ndarray) -> np.ndarray:
@@ -230,7 +277,18 @@ def main(argv: list[str] | None = None) -> int:
     p_ver.add_argument(
         "--output", "-o", type=Path, default=Path("gbuffer_review")
     )
+    p_stats = sub.add_parser(
+        "stats", help="per-face depth statistics (diagnosis: empty vs broken)"
+    )
+    p_stats.add_argument("--renders", type=Path, required=True)
+    p_stats.add_argument("--limit", type=int, default=None)
     args = parser.parse_args(argv)
+
+    if args.command == "stats":
+        if not args.renders.is_dir():
+            parser.error(f"renders dir not found: {args.renders}")
+        stats(args.renders, args.limit)
+        return 0
 
     if args.command == "prepare":
         if not args.poses.is_file():
