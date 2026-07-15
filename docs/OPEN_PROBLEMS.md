@@ -211,8 +211,17 @@ selection for Year-2 room emptying.
   group) likely swallowed the camera. At runtime this corrupts occlusion
   for that sweep. Fix path: details.py containment check (shrink/split
   boxes that contain a sweep position, or carve a clearance sphere).
-- Full-property 2048² G-buffer bake not yet run (validated at 1024² on
-  3 sweeps; renderer is resumable — background run, hours).
+- Full-property 2048² G-buffer bake HALTED at 49/198 sweeps — local DISK
+  EXHAUSTION (2026-07-15). The bake is resumable; nothing lost. Root cause:
+  output footprint — dual EXR + npy at 2048² for depth + world-normal is
+  ~300–400 MB/sweep (~60–80 GB full property). Storage-optimization
+  candidates before resuming: float16 storage (depth precision check
+  first), compressed .npz instead of raw .npy, drop the dual-format
+  redundancy (npy only until P4), optional half-res normals. WORKFLOW
+  POLICY (2026-07-15): all full-property batch runs are DEFERRED — stages
+  validate on sweep slices only; full runs queue until disk budget and/or
+  storage optimization lands. Applies to the G5 full IBL bake too (IBL
+  output is small, ~3 MB/sweep, but the policy is uniform).
 - KTX2 packing (toktx) deferred to P4 alongside Draco.
 - Alignment score absolute values are low (+0.04 mean) by nature (smooth
   proxy = few edges); composites are the gate, the score is only a trend
