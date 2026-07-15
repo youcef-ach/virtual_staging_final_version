@@ -17,6 +17,13 @@ dependencies = [
 # E57 sources are chunked per sweep via pye57 (native E57 tiling); PDAL only
 # becomes relevant for non-E57 inputs and can be added then.
 pointcloud = ["open3d>=0.18"]
+# Stage G6 semantic segmentation. Install: pip install -e .[segmentation]
+# Dev-GPU note (4 GB GTX 1650-class): default model is Mask2Former Swin-T +
+# fp16 (docs/OPEN_PROBLEMS.md #20). For CUDA on Windows install torch from
+# the matching index URL FIRST, e.g.:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu121
+# SAM (slice 2) will be added to this extra when boundary refinement lands.
+segmentation = ["torch>=2.2", "transformers>=4.44"]
 dev = [
   "pytest>=8.0",
   "ruff>=0.8",

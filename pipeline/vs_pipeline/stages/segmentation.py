@@ -1,0 +1,435 @@
+"""Stage 4 (G6) -- semantic segmentation, slice 1: per-face ADE20K -> 7-class masks.
+
+Segmentation runs on the extracted 90-deg pinhole faces -- exactly the
+perspective imagery Mask2Former is trained on (6 faces x 198 sweeps ~= 1,188
+images). SAM boundary refinement and 2D->3D fusion (G-buffer depth lift ->
+window/door openings + 3D furniture boxes) land in later slices.
+
+Hardware-driven variant policy (locked 2026-07-15, docs/OPEN_PROBLEMS.md #20):
+the model variant is a PARAMETER. The 4 GB dev GPU (GTX 1650-class) runs
+Mask2Former Swin-T + fp16 with faces resized to 640 px; production GPU workers
+(P3) swap to Swin-L via ``--model`` with zero code change. Hugging Face
+``transformers`` is used deliberately -- no detectron2 build pain on Windows.
+
+Both the RAW ADE20K label map and the remapped 7-class map are stored per
+face: remapping is lossless and re-runnable without re-inference, and
+downstream consumers can read raw labels the 7-class map collapses (e.g.
+Gate-1 glass exclusion wants ``windowpane`` UNION ``mirror``, while the
+7-class map deliberately sends ``mirror`` to ``other``).
+
+CLI:
+    python -m vs_pipeline.stages.segmentation infer --panos extracted_cubemaps \
+        -o seg_out --sweeps "1,50,60,175"
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+import cv2
+import numpy as np
+
+SEG_SCHEMA_VERSION = 1
+FACE_NAMES = ("px", "nx", "py", "ny", "pz", "nz")
+
+DEFAULT_MODEL = "facebook/mask2former-swin-tiny-ade-semantic"
+DEFAULT_MASK_SIZE = 640
+
+#: Our 7 classes (PLAN decision 4). Index = stored value in ``{face}_cls.png``.
+CLASSES = ("other", "floor", "wall", "ceiling", "window", "door", "furniture")
+CLASS_IDS = {name: i for i, name in enumerate(CLASSES)}
+
+CLASS_COLORS = np.array(
+    [
+        [128, 128, 128],  # other      gray
+        [80, 200, 80],  # floor      green
+        [70, 110, 230],  # wall       blue
+        [90, 220, 220],  # ceiling    cyan
+        [250, 220, 60],  # window     yellow
+        [245, 140, 40],  # door       orange
+        [220, 80, 200],  # furniture  magenta
+    ],
+    dtype=np.uint8,
+)
+
+# ADE20K label-name -> class sets (matched on the first ';'-separated synonym,
+# lowercased). NOTE: 'mirror' stays 'other' ON PURPOSE -- mirrors are not
+# windows for occlusion/openings, but Gate-1 exclusion reads mirror+windowpane
+# from the RAW ADE map, so nothing is lost.
+_FLOOR_NAMES = {"floor", "rug"}
+_WALL_NAMES = {"wall"}
+_CEILING_NAMES = {"ceiling"}
+_WINDOW_NAMES = {"windowpane", "window"}
+_DOOR_NAMES = {"door", "screen door"}
+_FURNITURE_NAMES = {
+    "bed",
+    "cabinet",
+    "table",
+    "chair",
+    "sofa",
+    "shelf",
+    "armchair",
+    "seat",
+    "desk",
+    "wardrobe",
+    "lamp",
+    "bathtub",
+    "cushion",
+    "pillow",
+    "chest of drawers",
+    "counter",
+    "countertop",
+    "sink",
+    "refrigerator",
+    "pool table",
+    "bookcase",
+    "coffee table",
+    "toilet",
+    "bench",
+    "stove",
+    "oven",
+    "microwave",
+    "dishwasher",
+    "washer",
+    "kitchen island",
+    "swivel chair",
+    "ottoman",
+    "buffet",
+    "stool",
+    "cradle",
+    "television receiver",
+    "television",
+    "computer",
+    "monitor",
+    "radiator",
+    "fireplace",
+    "chandelier",
+    "sconce",
+}
+
+
+def classify_ade_label(name: str) -> int:
+    """ADE20K label name -> our class id (first synonym, lowercased)."""
+    key = name.split(";")[0].strip().lower()
+    if key in _FLOOR_NAMES:
+        return CLASS_IDS["floor"]
+    if key in _WALL_NAMES:
+        return CLASS_IDS["wall"]
+    if key in _CEILING_NAMES:
+        return CLASS_IDS["ceiling"]
+    if key in _WINDOW_NAMES:
+        return CLASS_IDS["window"]
+    if key in _DOOR_NAMES:
+        return CLASS_IDS["door"]
+    if key in _FURNITURE_NAMES:
+        return CLASS_IDS["furniture"]
+    return CLASS_IDS["other"]
+
+
+def build_class_lut(id2label: dict[int, str]) -> np.ndarray:
+    """256-entry uint8 LUT: ADE label id -> our class id (unknown ids -> other)."""
+    lut = np.zeros(256, dtype=np.uint8)
+    for idx, name in id2label.items():
+        if 0 <= int(idx) < 256:
+            lut[int(idx)] = classify_ade_label(name)
+    return lut
+
+
+def remap_labels(ade_labels: np.ndarray, lut: np.ndarray) -> np.ndarray:
+    return lut[np.asarray(ade_labels, dtype=np.uint8)]
+
+
+def class_overlay(rgb_u8: np.ndarray, cls: np.ndarray, alpha: float = 0.45) -> np.ndarray:
+    """Blend the class colors over the face image (both HxW[x3], uint8)."""
+    colors = CLASS_COLORS[np.asarray(cls, dtype=np.uint8)]
+    mixed = (1.0 - alpha) * rgb_u8.astype(np.float32) + alpha * colors.astype(np.float32)
+    return np.clip(mixed, 0, 255).astype(np.uint8)
+
+
+@dataclass
+class SegParams:
+    model_name: str = DEFAULT_MODEL
+    mask_size: int = DEFAULT_MASK_SIZE
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"model_name": self.model_name, "mask_size": self.mask_size}
+
+
+class Mask2FormerRunner:
+    """Lazy torch/transformers wrapper (importable without the extra installed)."""
+
+    def __init__(self, model_name: str, device: str = "auto", fp16: bool = True) -> None:
+        import torch
+        from transformers import (
+            AutoImageProcessor,
+            Mask2FormerForUniversalSegmentation,
+        )
+
+        self._torch = torch
+        if device == "auto":
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = device
+        self.fp16 = bool(fp16 and device == "cuda")
+        self.processor = AutoImageProcessor.from_pretrained(model_name)
+        model = Mask2FormerForUniversalSegmentation.from_pretrained(model_name)
+        model.eval().to(device)
+        if self.fp16:
+            model.half()
+        self.model = model
+        self.id2label = {int(k): str(v) for k, v in model.config.id2label.items()}
+        print(f"model {model_name} on {self.device} (fp16={self.fp16})")
+
+    def infer_face(self, rgb_u8: np.ndarray) -> np.ndarray:
+        """RGB uint8 (H, W, 3) -> ADE20K label map uint8 (H, W)."""
+        torch = self._torch
+        inputs = self.processor(images=rgb_u8, return_tensors="pt")
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+        if self.fp16 and "pixel_values" in inputs:
+            inputs["pixel_values"] = inputs["pixel_values"].half()
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+        seg = self.processor.post_process_semantic_segmentation(
+            outputs, target_sizes=[tuple(rgb_u8.shape[:2])]
+        )[0]
+        return seg.to("cpu").numpy().astype(np.uint8)
+
+
+# ---------------------------------------------------------------------------- infer
+
+
+def _outputs_current(meta_path: Path, sweep_out: Path, params: SegParams) -> bool:
+    if not meta_path.is_file():
+        return False
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if meta.get("params") != params.to_dict():
+        return False
+    faces = meta.get("files", {}).get("faces", {})
+    if sorted(faces) != sorted(FACE_NAMES):
+        return False
+    return all(
+        (sweep_out / entry[kind]).is_file()
+        for entry in faces.values()
+        for kind in ("ade", "cls")
+    )
+
+
+def _panel(img_u8: np.ndarray, label: str, size: int = 256) -> np.ndarray:
+    if img_u8.ndim == 2:
+        img_u8 = cv2.cvtColor(img_u8, cv2.COLOR_GRAY2RGB)
+    interp = cv2.INTER_NEAREST if img_u8.shape[0] < size else cv2.INTER_AREA
+    img = cv2.resize(np.ascontiguousarray(img_u8), (size, size), interpolation=interp)
+    cv2.putText(img, label, (4, 16), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1, cv2.LINE_AA)
+    return img
+
+
+def _legend(width: int, height: int = 26) -> np.ndarray:
+    bar = np.zeros((height, width, 3), dtype=np.uint8)
+    seg_w = width // len(CLASSES)
+    for i, name in enumerate(CLASSES):
+        bar[:, i * seg_w : (i + 1) * seg_w] = CLASS_COLORS[i]
+        cv2.putText(
+            bar, name, (i * seg_w + 4, height - 8), cv2.FONT_HERSHEY_SIMPLEX,
+            0.45, (0, 0, 0), 1, cv2.LINE_AA,
+        )
+    return bar
+
+
+def infer(
+    panos_dir: Path,
+    out_dir: Path,
+    params: SegParams,
+    sweep_indices: set[int] | None = None,
+    device: str = "auto",
+    fp16: bool = True,
+    force: bool = False,
+    write_review: bool = True,
+) -> dict[str, list[str]]:
+    """Run per-face segmentation for the selected sweeps; idempotent per sweep."""
+    manifest = json.loads((panos_dir / "manifest.json").read_text(encoding="utf-8"))
+    entries = list(manifest.get("sweeps", []))
+    if sweep_indices is not None:
+        entries = [e for e in entries if int(e["index"]) in sweep_indices]
+    out_dir.mkdir(parents=True, exist_ok=True)
+    summary: dict[str, list[str]] = {"processed": [], "skipped": [], "failed": []}
+    runner: Mask2FormerRunner | None = None
+    lut: np.ndarray | None = None
+
+    for entry in entries:
+        uuid = str(entry["sweep_uuid"])
+        idx = int(entry["index"])
+        faces_rel = entry.get("faces", {})
+        if sorted(faces_rel) != sorted(FACE_NAMES):
+            print(f"[{idx:03d}] {uuid}: incomplete faces -> FAILED")
+            summary["failed"].append(uuid)
+            continue
+        sweep_out = out_dir / uuid
+        meta_path = sweep_out / "seg_meta.json"
+        if not force and _outputs_current(meta_path, sweep_out, params):
+            print(f"[{idx:03d}] {uuid}: up to date -> skipped")
+            summary["skipped"].append(uuid)
+            continue
+
+        if runner is None:
+            runner = Mask2FormerRunner(params.model_name, device=device, fp16=fp16)
+            lut = build_class_lut(runner.id2label)
+        assert lut is not None
+
+        t0 = time.perf_counter()
+        sweep_out.mkdir(parents=True, exist_ok=True)
+        files: dict[str, Any] = {"faces": {}}
+        counts = np.zeros(len(CLASSES), dtype=np.int64)
+        rows: list[np.ndarray] = []
+        failed = False
+        for face in FACE_NAMES:
+            img = cv2.imread(str(panos_dir / faces_rel[face]), cv2.IMREAD_COLOR)
+            if img is None:
+                print(f"[{idx:03d}] {uuid}: unreadable face {face} -> FAILED")
+                failed = True
+                break
+            rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            rgb = cv2.resize(
+                rgb, (params.mask_size, params.mask_size), interpolation=cv2.INTER_AREA
+            )
+            ade = runner.infer_face(rgb)
+            cls = remap_labels(ade, lut)
+            cv2.imwrite(str(sweep_out / f"{face}_ade.png"), ade)
+            cv2.imwrite(str(sweep_out / f"{face}_cls.png"), cls)
+            files["faces"][face] = {"ade": f"{face}_ade.png", "cls": f"{face}_cls.png"}
+            counts += np.bincount(cls.reshape(-1), minlength=len(CLASSES))
+            if write_review:
+                rows.append(
+                    np.hstack(
+                        [
+                            _panel(rgb, face),
+                            _panel(class_overlay(rgb, cls), "classes"),
+                        ]
+                    )
+                )
+        if failed:
+            summary["failed"].append(uuid)
+            continue
+
+        fractions = {
+            name: float(counts[i]) / float(max(counts.sum(), 1))
+            for i, name in enumerate(CLASSES)
+        }
+        elapsed = time.perf_counter() - t0
+
+        if write_review and rows:
+            review_dir = out_dir / "review"
+            review_dir.mkdir(parents=True, exist_ok=True)
+            body = np.vstack(rows)
+            composite = np.vstack([_legend(body.shape[1]), body])
+            cv2.imwrite(
+                str(review_dir / f"seg_{idx:03d}_{uuid}.png"),
+                cv2.cvtColor(composite, cv2.COLOR_RGB2BGR),
+            )
+
+        meta = {
+            "schema_version": SEG_SCHEMA_VERSION,
+            "sweep_uuid": uuid,
+            "index": idx,
+            "params": params.to_dict(),
+            "runtime": {"device": runner.device, "fp16": runner.fp16},
+            "classes": list(CLASSES),
+            "files": files,
+            "stats": {"class_fractions": fractions, "seconds": elapsed},
+        }
+        meta_path.write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
+
+        frac_str = " ".join(f"{n[:4]} {fractions[n]:5.1%}" for n in CLASSES)
+        print(f"[{idx:03d}] {uuid}: {frac_str}  ({elapsed:.1f} s)")
+        summary["processed"].append(uuid)
+
+    index_path = assemble_index(out_dir)
+    print(
+        f"processed {len(summary['processed'])}, skipped {len(summary['skipped'])}, "
+        f"failed {len(summary['failed'])} -> {index_path}"
+    )
+    return summary
+
+
+def assemble_index(out_dir: Path) -> Path:
+    """Rebuild segmentation_index.json from every per-sweep meta on disk."""
+    sweeps = []
+    for meta_path in sorted(out_dir.glob("*/seg_meta.json")):
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        sweeps.append(
+            {
+                "sweep_uuid": meta["sweep_uuid"],
+                "index": meta["index"],
+                "params": meta["params"],
+                "class_fractions": meta["stats"]["class_fractions"],
+            }
+        )
+    sweeps.sort(key=lambda s: int(s["index"]))
+    payload = {
+        "schema_version": SEG_SCHEMA_VERSION,
+        "classes": list(CLASSES),
+        "sweep_count": len(sweeps),
+        "sweeps": sweeps,
+    }
+    path = out_dir / "segmentation_index.json"
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+# ----------------------------------------------------------------------------- CLI
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Stage 4 (G6) slice 1: per-face semantic segmentation."
+    )
+    sub = parser.add_subparsers(dest="command", required=True)
+    p_inf = sub.add_parser("infer", help="extracted cubemaps -> ADE + 7-class masks")
+    p_inf.add_argument("--panos", type=Path, required=True, help="extracted_cubemaps dir")
+    p_inf.add_argument("--output", "-o", type=Path, default=Path("seg_out"))
+    p_inf.add_argument(
+        "--sweeps", type=str, default=None, help="index selection, e.g. '1,50,60,175'"
+    )
+    p_inf.add_argument(
+        "--model",
+        type=str,
+        default=DEFAULT_MODEL,
+        help="HF model id (Swin-T default for the 4 GB dev GPU; Swin-L on workers)",
+    )
+    p_inf.add_argument("--mask-size", type=int, default=DEFAULT_MASK_SIZE)
+    p_inf.add_argument("--device", type=str, default="auto", help="auto | cuda | cpu")
+    p_inf.add_argument("--no-fp16", action="store_true")
+    p_inf.add_argument("--force", action="store_true")
+    p_inf.add_argument("--no-review", action="store_true")
+    args = parser.parse_args(argv)
+
+    if not (args.panos / "manifest.json").is_file():
+        parser.error(f"manifest.json not found in panos dir: {args.panos}")
+    from vs_pipeline.stages.ibl import parse_sweep_selection
+
+    params = SegParams(model_name=args.model, mask_size=args.mask_size)
+    selection = parse_sweep_selection(args.sweeps) if args.sweeps else None
+    infer(
+        args.panos,
+        args.output,
+        params,
+        sweep_indices=selection,
+        device=args.device,
+        fp16=not args.no_fp16,
+        force=args.force,
+        write_review=not args.no_review,
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

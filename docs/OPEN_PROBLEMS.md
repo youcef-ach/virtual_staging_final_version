@@ -232,8 +232,26 @@ test is the G8 gate).
 - Research: inverse tone mapping / LDR-to-HDR panorama reconstruction
   (StyleLight, EverLight), indoor lighting estimation from panoramas.
 
-### 18. G6 segmentation — not started; three consumers already waiting:
-Gate-1 mask feedback (#7), window openings (#3), Year-2 room emptying.
+### 18. G6 segmentation — STARTED 2026-07-15 (slice 1: per-face 2D inference
+shipped). Consumers waiting: Gate-1 mask feedback (#7), window openings (#3),
+segmentation-guided highlight boost (#17), Year-2 room emptying. Later
+slices: SAM boundary refinement, 2D→3D fusion (G-buffer depth lift → wall
+openings + 3D furniture boxes), Gate-2 click-fix mask editor.
+
+### 20. G6 model variants constrained by dev hardware — DEFERRED (worker upgrade)
+Dev GPU is a 4 GB GTX 1650-class laptop card. Locked LOCAL configuration:
+Mask2Former **Swin-T** ADE20K semantic (HF `transformers`, no detectron2
+build) + fp16, faces resized to 640 px for inference, masks stored at that
+size; SAM **ViT-B** planned for slice-2 refinement (MobileSAM fallback if
+4 GB still chokes). CPU fallback works but is roughly an order of magnitude
+slower. DEFERRED to P3 GPU workers (L4/A10G): **Swin-L**, **SAM ViT-H**,
+higher mask resolution, batched inference. The variant is a CLI parameter
+(`--model`, `--mask-size`) and part of the per-sweep idempotency identity,
+so the upgrade is a parameter-swap re-run with zero code change (old masks
+re-infer intentionally). Quality delta Swin-T vs Swin-L on our 7-class
+mapping is UNMEASURED — measure before trusting Swin-T masks for Gate-1
+exclusion (#7) and highlight reconstruction (#17), e.g. on the 50-scan set
+or first worker deployment.
 
 ### 19. MatterPak OBJ decimation — accepted limitation
 Causes QA render softness and the pose-QA detection floor; OBJ is only a
