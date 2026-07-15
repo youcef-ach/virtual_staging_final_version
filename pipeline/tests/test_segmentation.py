@@ -85,7 +85,51 @@ def test_outputs_current_idempotency(tmp_path):
 
 def test_module_imports_without_torch():
     # The stage module must stay importable without the [segmentation] extra;
-    # torch/transformers are lazy-imported inside Mask2FormerRunner only.
+    # torch/transformers/segment-anything are lazy-imported inside the runners.
     import vs_pipeline.stages.segmentation as seg
 
     assert hasattr(seg, "Mask2FormerRunner")
+    assert hasattr(seg, "SamRefiner")
+
+
+def test_extract_instances_boxes_and_min_area():
+    from vs_pipeline.stages.segmentation import extract_instances
+
+    cls = np.zeros((32, 32), dtype=np.uint8)
+    cls[2:10, 2:10] = CLASS_IDS["window"]  # 64 px component
+    cls[20:22, 20:22] = CLASS_IDS["window"]  # 4 px -> below min_area
+    cls[12:18, 14:26] = CLASS_IDS["furniture"]  # 72 px component
+    inst = extract_instances(cls, min_area=10)
+    assert len(inst) == 2
+    by_class = {i["class_id"]: i for i in inst}
+    assert by_class[CLASS_IDS["window"]]["box"] == (2, 2, 10, 10)
+    assert by_class[CLASS_IDS["furniture"]]["area"] == 72
+
+
+def test_mask_iou():
+    from vs_pipeline.stages.segmentation import mask_iou
+
+    a = np.zeros((8, 8), dtype=bool)
+    b = np.zeros((8, 8), dtype=bool)
+    a[0:4, 0:4] = True
+    b[2:6, 0:4] = True
+    assert abs(mask_iou(a, b) - (8.0 / 24.0)) < 1e-9
+    assert mask_iou(np.zeros((4, 4), bool), np.zeros((4, 4), bool)) == 0.0
+
+
+def test_merge_refined_paint_order():
+    from vs_pipeline.stages.segmentation import merge_refined
+
+    cls = np.zeros((8, 8), dtype=np.uint8)
+    big = np.zeros((8, 8), dtype=bool)
+    big[0:6, 0:6] = True
+    small = np.zeros((8, 8), dtype=bool)
+    small[2:4, 2:4] = True
+    refined = merge_refined(
+        cls,
+        [(CLASS_IDS["door"], small), (CLASS_IDS["window"], big)],
+    )
+    # Large painted first, small stays on top regardless of input order.
+    assert refined[0, 0] == CLASS_IDS["window"]
+    assert refined[3, 3] == CLASS_IDS["door"]
+    assert refined[7, 7] == 0

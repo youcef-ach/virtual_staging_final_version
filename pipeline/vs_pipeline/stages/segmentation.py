@@ -199,6 +199,245 @@ class Mask2FormerRunner:
         return seg.to("cpu").numpy().astype(np.uint8)
 
 
+# --------------------------------------------------------------- SAM refinement (slice 2)
+
+#: Classes whose boundaries feed downstream geometry (openings, 3D boxes).
+REFINE_CLASS_IDS = (CLASS_IDS["window"], CLASS_IDS["door"], CLASS_IDS["furniture"])
+
+_SAM_CHECKPOINT_URLS = {
+    "vit_b": "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth",
+    "vit_l": "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_l_0b3195.pth",
+    "vit_h": "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth",
+}
+
+
+@dataclass
+class RefineParams:
+    sam_model: str = "vit_b"  # 4 GB dev GPU; vit_h on P3 workers (OPEN_PROBLEMS #20)
+    min_area: int = 300  # px at mask_size; smaller components are left as-is
+    iou_min: float = 0.30  # SAM mask vs original component; below = SAM grabbed something else
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "sam_model": self.sam_model,
+            "min_area": self.min_area,
+            "iou_min": self.iou_min,
+        }
+
+
+def extract_instances(
+    cls: np.ndarray,
+    min_area: int,
+    class_ids: tuple[int, ...] = REFINE_CLASS_IDS,
+) -> list[dict[str, Any]]:
+    """Connected components of the refine classes -> box prompts for SAM."""
+    out: list[dict[str, Any]] = []
+    for cid in class_ids:
+        mask = (np.asarray(cls) == cid).astype(np.uint8)
+        n, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+        for i in range(1, n):
+            x, y, w, h, area = (int(v) for v in stats[i])
+            if area < min_area:
+                continue
+            out.append(
+                {
+                    "class_id": int(cid),
+                    "box": (x, y, x + w, y + h),
+                    "area": area,
+                    "mask": labels == i,
+                }
+            )
+    return out
+
+
+def mask_iou(a: np.ndarray, b: np.ndarray) -> float:
+    union = int(np.logical_or(a, b).sum())
+    if union == 0:
+        return 0.0
+    return float(np.logical_and(a, b).sum()) / float(union)
+
+
+def merge_refined(
+    cls: np.ndarray, refinements: list[tuple[int, np.ndarray]]
+) -> np.ndarray:
+    """Paint refined masks over the class map, largest first (small stay on top)."""
+    refined = np.asarray(cls).copy()
+    for cid, mask in sorted(refinements, key=lambda t: int(t[1].sum()), reverse=True):
+        refined[mask] = cid
+    return refined
+
+
+class SamRefiner:
+    """Lazy segment-anything wrapper; checkpoint auto-downloads if missing."""
+
+    def __init__(self, checkpoint: Path, model_type: str = "vit_b", device: str = "auto"):
+        import torch
+        from segment_anything import SamPredictor, sam_model_registry
+
+        if device == "auto":
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = device
+        checkpoint = Path(checkpoint)
+        if not checkpoint.is_file():
+            url = _SAM_CHECKPOINT_URLS.get(model_type)
+            if url is None:
+                raise ValueError(f"no checkpoint URL known for SAM type {model_type}")
+            checkpoint.parent.mkdir(parents=True, exist_ok=True)
+            print(f"downloading SAM {model_type} checkpoint -> {checkpoint}")
+            torch.hub.download_url_to_file(url, str(checkpoint))
+        sam = sam_model_registry[model_type](checkpoint=str(checkpoint))
+        sam.to(device)
+        self.predictor = SamPredictor(sam)
+        print(f"SAM {model_type} on {device}")
+
+    def refine_face(
+        self, rgb_u8: np.ndarray, instances: list[dict[str, Any]]
+    ) -> list[np.ndarray]:
+        self.predictor.set_image(rgb_u8)
+        masks: list[np.ndarray] = []
+        for inst in instances:
+            m, _, _ = self.predictor.predict(
+                box=np.asarray(inst["box"], dtype=np.float32), multimask_output=False
+            )
+            masks.append(np.asarray(m[0], dtype=bool))
+        return masks
+
+
+def _refine_current(meta_path: Path, sweep_out: Path, params: RefineParams) -> bool:
+    if not meta_path.is_file():
+        return False
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if meta.get("params") != params.to_dict():
+        return False
+    faces = meta.get("files", {}).get("faces", {})
+    if sorted(faces) != sorted(FACE_NAMES):
+        return False
+    return all((sweep_out / name).is_file() for name in faces.values())
+
+
+def refine(
+    panos_dir: Path,
+    seg_dir: Path,
+    params: RefineParams,
+    checkpoint: Path,
+    sweep_indices: set[int] | None = None,
+    device: str = "auto",
+    force: bool = False,
+    write_review: bool = True,
+) -> dict[str, list[str]]:
+    """SAM boundary refinement of window/door/furniture masks; idempotent per sweep."""
+    summary: dict[str, list[str]] = {"processed": [], "skipped": [], "failed": []}
+    refiner: SamRefiner | None = None
+    metas = []
+    for meta_path in sorted(seg_dir.glob("*/seg_meta.json")):
+        try:
+            metas.append(json.loads(meta_path.read_text(encoding="utf-8")))
+        except (OSError, json.JSONDecodeError):
+            continue
+    if sweep_indices is not None:
+        metas = [m for m in metas if int(m["index"]) in sweep_indices]
+    metas.sort(key=lambda m: int(m["index"]))
+
+    for meta in metas:
+        uuid = str(meta["sweep_uuid"])
+        idx = int(meta["index"])
+        mask_size = int(meta["params"]["mask_size"])
+        sweep_out = seg_dir / uuid
+        rmeta_path = sweep_out / "refine_meta.json"
+        if not force and _refine_current(rmeta_path, sweep_out, params):
+            print(f"[{idx:03d}] {uuid}: refinement up to date -> skipped")
+            summary["skipped"].append(uuid)
+            continue
+
+        t0 = time.perf_counter()
+        files: dict[str, Any] = {"faces": {}}
+        rows: list[np.ndarray] = []
+        n_inst = n_kept = n_lowiou = 0
+        failed = False
+        for face in FACE_NAMES:
+            img = cv2.imread(str(panos_dir / uuid / f"{face}.jpg"), cv2.IMREAD_COLOR)
+            cls = cv2.imread(str(sweep_out / f"{face}_cls.png"), cv2.IMREAD_GRAYSCALE)
+            if img is None or cls is None:
+                print(f"[{idx:03d}] {uuid}: missing face/mask {face} -> FAILED")
+                failed = True
+                break
+            rgb = cv2.resize(
+                cv2.cvtColor(img, cv2.COLOR_BGR2RGB),
+                (mask_size, mask_size),
+                interpolation=cv2.INTER_AREA,
+            )
+            instances = extract_instances(cls, params.min_area)
+            kept: list[tuple[int, np.ndarray]] = []
+            if instances:
+                if refiner is None:
+                    refiner = SamRefiner(
+                        checkpoint, model_type=params.sam_model, device=device
+                    )
+                sam_masks = refiner.refine_face(rgb, instances)
+                for inst, m in zip(instances, sam_masks, strict=True):
+                    if mask_iou(m, inst["mask"]) >= params.iou_min:
+                        kept.append((inst["class_id"], m))
+                    else:
+                        n_lowiou += 1
+            n_inst += len(instances)
+            n_kept += len(kept)
+            refined = merge_refined(cls, kept)
+            cv2.imwrite(str(sweep_out / f"{face}_cls_refined.png"), refined)
+            files["faces"][face] = f"{face}_cls_refined.png"
+            if write_review:
+                rows.append(
+                    np.hstack(
+                        [
+                            _panel(rgb, face),
+                            _panel(class_overlay(rgb, cls), "mask2former"),
+                            _panel(class_overlay(rgb, refined), "sam refined"),
+                        ]
+                    )
+                )
+        if failed:
+            summary["failed"].append(uuid)
+            continue
+
+        elapsed = time.perf_counter() - t0
+        if write_review and rows:
+            review_dir = seg_dir / "review"
+            review_dir.mkdir(parents=True, exist_ok=True)
+            body = np.vstack(rows)
+            composite = np.vstack([_legend(body.shape[1]), body])
+            cv2.imwrite(
+                str(review_dir / f"refine_{idx:03d}_{uuid}.png"),
+                cv2.cvtColor(composite, cv2.COLOR_RGB2BGR),
+            )
+        rmeta = {
+            "schema_version": SEG_SCHEMA_VERSION,
+            "sweep_uuid": uuid,
+            "index": idx,
+            "params": params.to_dict(),
+            "files": files,
+            "stats": {
+                "instances": n_inst,
+                "refined": n_kept,
+                "low_iou_skipped": n_lowiou,
+                "seconds": elapsed,
+            },
+        }
+        rmeta_path.write_text(json.dumps(rmeta, indent=2) + "\n", encoding="utf-8")
+        print(
+            f"[{idx:03d}] {uuid}: {n_inst} instance(s), {n_kept} refined, "
+            f"{n_lowiou} low-IoU skipped  ({elapsed:.1f} s)"
+        )
+        summary["processed"].append(uuid)
+
+    print(
+        f"processed {len(summary['processed'])}, skipped {len(summary['skipped'])}, "
+        f"failed {len(summary['failed'])}"
+    )
+    return summary
+
+
 # ---------------------------------------------------------------------------- infer
 
 
@@ -410,14 +649,52 @@ def main(argv: list[str] | None = None) -> int:
     p_inf.add_argument("--no-fp16", action="store_true")
     p_inf.add_argument("--force", action="store_true")
     p_inf.add_argument("--no-review", action="store_true")
+
+    p_ref = sub.add_parser("refine", help="SAM boundary refinement of window/door/furniture")
+    p_ref.add_argument("--panos", type=Path, required=True, help="extracted_cubemaps dir")
+    p_ref.add_argument("--seg-dir", type=Path, default=Path("seg_out"))
+    p_ref.add_argument("--sweeps", type=str, default=None)
+    p_ref.add_argument(
+        "--sam-model", type=str, default="vit_b", help="vit_b (4 GB dev GPU) | vit_l | vit_h"
+    )
+    p_ref.add_argument(
+        "--checkpoint",
+        type=Path,
+        default=Path("models") / "sam_vit_b_01ec64.pth",
+        help="SAM checkpoint path (auto-downloads if missing)",
+    )
+    p_ref.add_argument("--min-area", type=int, default=300)
+    p_ref.add_argument("--iou-min", type=float, default=0.30)
+    p_ref.add_argument("--device", type=str, default="auto")
+    p_ref.add_argument("--force", action="store_true")
+    p_ref.add_argument("--no-review", action="store_true")
     args = parser.parse_args(argv)
+
+    from vs_pipeline.stages.ibl import parse_sweep_selection
+
+    selection = parse_sweep_selection(args.sweeps) if args.sweeps else None
+
+    if args.command == "refine":
+        if not args.seg_dir.is_dir():
+            parser.error(f"seg dir not found: {args.seg_dir}")
+        rparams = RefineParams(
+            sam_model=args.sam_model, min_area=args.min_area, iou_min=args.iou_min
+        )
+        refine(
+            args.panos,
+            args.seg_dir,
+            rparams,
+            checkpoint=args.checkpoint,
+            sweep_indices=selection,
+            device=args.device,
+            force=args.force,
+            write_review=not args.no_review,
+        )
+        return 0
 
     if not (args.panos / "manifest.json").is_file():
         parser.error(f"manifest.json not found in panos dir: {args.panos}")
-    from vs_pipeline.stages.ibl import parse_sweep_selection
-
     params = SegParams(model_name=args.model, mask_size=args.mask_size)
-    selection = parse_sweep_selection(args.sweeps) if args.sweeps else None
     infer(
         args.panos,
         args.output,

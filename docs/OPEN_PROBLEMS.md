@@ -45,6 +45,15 @@ initially mimicked stairwell geometry and locally corrupt the wall-line
 graph. Mirror-artifact detection would clean both G2 candidates and the
 room graph. Search: “mirror artifact removal laser scanning indoor”,
 “specular reflection point cloud phantom geometry”.
+OBSERVATION (2026-07-15, G6 mirror check, bathroom sweeps 152/157):
+Mask2Former Swin-T labels mirror SURFACES as wall and segments the
+REFLECTED content as if real (furniture/wall inside the mirror); the raw
+ADE `mirror` label was NOT emitted — so Gate-1 mirror exclusion cannot
+rely on the raw ADE map alone. Critically, mirrors are NOT labeled window
+(no false openings). Promising fusion-based mirror detector (G6 slice 3
+candidate): pixels whose 2D label says room content (furniture/floor/
+ceiling) but whose G-buffer depth lands ON a wall plane = mirror
+reflection — cheap, uses data we already bake.
 - Research: “glass detection terrestrial laser scanning”, “specular/mirror
   artifact removal LiDAR indoor”, “transparent surface reconstruction”;
   also G6 (Mask2Former window class) can feed masks back into Gate 1 and G2.
