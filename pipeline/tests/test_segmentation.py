@@ -133,3 +133,35 @@ def test_merge_refined_paint_order():
     assert refined[0, 0] == CLASS_IDS["window"]
     assert refined[3, 3] == CLASS_IDS["door"]
     assert refined[7, 7] == 0
+
+
+def test_inverse_transform_face_inverts_forward():
+    from vs_pipeline.cubemap_transforms import AXES, inverse_transform_face, transform_face
+
+    rng = np.random.default_rng(7)
+    for src in AXES:
+        arr = rng.integers(0, 255, size=(8, 8, 3), dtype=np.uint8)
+        out, out_axis = transform_face(arr, src)
+        rec, src_axis = inverse_transform_face(out, out_axis)
+        assert src_axis == src
+        assert np.array_equal(rec, arr)
+
+
+def test_upright_round_trip_all_faces():
+    from vs_pipeline.stages.segmentation import stored_from_upright, upright_from_stored
+
+    rng = np.random.default_rng(11)
+    for face in FACE_NAMES:
+        arr = rng.integers(0, 255, size=(16, 16), dtype=np.uint8)
+        up = upright_from_stored(arr, face)
+        back = stored_from_upright(up, face)
+        assert np.array_equal(back, arr)
+        # Uprighting must actually change rotated faces (not be a no-op everywhere).
+    changed = any(
+        not np.array_equal(
+            upright_from_stored(np.arange(64, dtype=np.uint8).reshape(8, 8), face),
+            np.arange(64, dtype=np.uint8).reshape(8, 8),
+        )
+        for face in FACE_NAMES
+    )
+    assert changed

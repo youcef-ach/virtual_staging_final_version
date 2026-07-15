@@ -34,8 +34,42 @@ from typing import Any
 import cv2
 import numpy as np
 
+from vs_pipeline.cubemap_transforms import (
+    FACE_OUTPUT_AXIS,
+    inverse_transform_face,
+    transform_face,
+)
+
 SEG_SCHEMA_VERSION = 1
 FACE_NAMES = ("px", "nx", "py", "ny", "pz", "nz")
+
+#: face name <-> cubemap axis (stored/canonical convention).
+_FACE_TO_AXIS = {"px": "+X", "nx": "-X", "py": "+Y", "ny": "-Y", "pz": "+Z", "nz": "-Z"}
+_SOURCE_FOR_OUTPUT = {v: k for k, v in FACE_OUTPUT_AXIS.items()}
+
+
+def upright_from_stored(arr: np.ndarray, face: str) -> np.ndarray:
+    """Stored canonical face -> upright (gravity-down) photo orientation.
+
+    The stored faces carry the Set A canonical transforms (a Z-up cubemap
+    layout the VIEWER corrects at runtime via the F4.4 reflection matrix) --
+    several faces are rotated/flipped and are NOT upright photos.
+    Segmentation models assume gravity-down images, so faces are uprighted
+    before inference and label maps are mapped back after. Pure rot90/flip
+    permutations: lossless both ways, masks stay pixel-aligned with the
+    stored extracted faces (required by the F5-calibration fusion path).
+    """
+    out, _src = inverse_transform_face(np.asarray(arr), _FACE_TO_AXIS[face])
+    return np.ascontiguousarray(out)
+
+
+def stored_from_upright(arr: np.ndarray, face: str) -> np.ndarray:
+    """Inverse of :func:`upright_from_stored` (labels back to the stored layout)."""
+    src = _SOURCE_FOR_OUTPUT[_FACE_TO_AXIS[face]]
+    out, out_axis = transform_face(np.asarray(arr), src)
+    assert out_axis == _FACE_TO_AXIS[face]
+    return np.ascontiguousarray(out)
+
 
 DEFAULT_MODEL = "facebook/mask2former-swin-tiny-ade-semantic"
 DEFAULT_MASK_SIZE = 640
@@ -155,9 +189,14 @@ def class_overlay(rgb_u8: np.ndarray, cls: np.ndarray, alpha: float = 0.45) -> n
 class SegParams:
     model_name: str = DEFAULT_MODEL
     mask_size: int = DEFAULT_MASK_SIZE
+    upright: bool = True  # upright faces before inference (identity bump: re-infers old masks)
 
     def to_dict(self) -> dict[str, Any]:
-        return {"model_name": self.model_name, "mask_size": self.mask_size}
+        return {
+            "model_name": self.model_name,
+            "mask_size": self.mask_size,
+            "upright": self.upright,
+        }
 
 
 class Mask2FormerRunner:
@@ -216,12 +255,14 @@ class RefineParams:
     sam_model: str = "vit_b"  # 4 GB dev GPU; vit_h on P3 workers (OPEN_PROBLEMS #20)
     min_area: int = 300  # px at mask_size; smaller components are left as-is
     iou_min: float = 0.30  # SAM mask vs original component; below = SAM grabbed something else
+    upright: bool = True  # refine in upright orientation (identity bump)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "sam_model": self.sam_model,
             "min_area": self.min_area,
             "iou_min": self.iou_min,
+            "upright": self.upright,
         }
 
 
@@ -364,11 +405,13 @@ def refine(
                 print(f"[{idx:03d}] {uuid}: missing face/mask {face} -> FAILED")
                 failed = True
                 break
+            rgb = upright_from_stored(cv2.cvtColor(img, cv2.COLOR_BGR2RGB), face)
             rgb = cv2.resize(
-                cv2.cvtColor(img, cv2.COLOR_BGR2RGB),
+                rgb,
                 (mask_size, mask_size),
                 interpolation=cv2.INTER_AREA,
             )
+            cls = upright_from_stored(cls, face)
             instances = extract_instances(cls, params.min_area)
             kept: list[tuple[int, np.ndarray]] = []
             if instances:
@@ -385,7 +428,10 @@ def refine(
             n_inst += len(instances)
             n_kept += len(kept)
             refined = merge_refined(cls, kept)
-            cv2.imwrite(str(sweep_out / f"{face}_cls_refined.png"), refined)
+            cv2.imwrite(
+                str(sweep_out / f"{face}_cls_refined.png"),
+                stored_from_upright(refined, face),
+            )
             files["faces"][face] = f"{face}_cls_refined.png"
             if write_review:
                 rows.append(
@@ -533,14 +579,14 @@ def infer(
                 print(f"[{idx:03d}] {uuid}: unreadable face {face} -> FAILED")
                 failed = True
                 break
-            rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            rgb = upright_from_stored(cv2.cvtColor(img, cv2.COLOR_BGR2RGB), face)
             rgb = cv2.resize(
                 rgb, (params.mask_size, params.mask_size), interpolation=cv2.INTER_AREA
             )
             ade = runner.infer_face(rgb)
             cls = remap_labels(ade, lut)
-            cv2.imwrite(str(sweep_out / f"{face}_ade.png"), ade)
-            cv2.imwrite(str(sweep_out / f"{face}_cls.png"), cls)
+            cv2.imwrite(str(sweep_out / f"{face}_ade.png"), stored_from_upright(ade, face))
+            cv2.imwrite(str(sweep_out / f"{face}_cls.png"), stored_from_upright(cls, face))
             files["faces"][face] = {"ade": f"{face}_ade.png", "cls": f"{face}_cls.png"}
             counts += np.bincount(cls.reshape(-1), minlength=len(CLASSES))
             if write_review:
@@ -579,6 +625,8 @@ def infer(
             "params": params.to_dict(),
             "runtime": {"device": runner.device, "fp16": runner.fp16},
             "classes": list(CLASSES),
+            "mask_orientation": "stored canonical (pixel-aligned with extracted faces); "
+            "inference ran upright",
             "files": files,
             "stats": {"class_fractions": fractions, "seconds": elapsed},
         }

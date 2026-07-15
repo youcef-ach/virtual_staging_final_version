@@ -96,6 +96,23 @@ def apply_canonical_transforms(faces_by_axis: dict[str, np.ndarray]) -> dict[str
     return out
 
 
+FACE_OUTPUT_AXIS_INV: dict[str, str] = {v: k for k, v in FACE_OUTPUT_AXIS.items()}
+
+
+def inverse_transform_face(array: np.ndarray, output_axis: str) -> tuple[np.ndarray, str]:
+    """Exact inverse of :func:`transform_face`.
+
+    Canonical stored face -> the raw (upright pinhole) orientation.
+    Returns ``(array, source_axis)``. Pure permutations: lossless.
+    """
+    if output_axis not in AXES:
+        raise ValueError(f"unknown face axis: {output_axis}")
+    source_axis = FACE_OUTPUT_AXIS_INV[output_axis]
+    unflipped = flip_lossless(array, FACE_FLIPS[source_axis])
+    angle = (360 - FACE_ROTATIONS_CW[source_axis]) % 360
+    return rotate_cw_lossless(unflipped, angle), source_axis
+
+
 def dir_to_equirect_uv(dx: Any, dy: Any, dz: Any) -> tuple[Any, Any]:
     """3D direction -> equirectangular UV in [0, 1] (standard spherical mapping)."""
     phi = np.arcsin(np.clip(dz, -1.0, 1.0))
