@@ -23,7 +23,13 @@ pointcloud = ["open3d>=0.18"]
 # the matching index URL FIRST, e.g.:
 #   pip install torch --index-url https://download.pytorch.org/whl/cu121
 # SAM (slice 2) will be added to this extra when boundary refinement lands.
-segmentation = ["torch>=2.2", "transformers>=4.44"]
+segmentation = [
+  "torch>=2.2",
+  "torchvision>=0.17",
+  "transformers>=4.44",
+  "pillow>=10.0",
+  "scipy>=1.11",
+]
 dev = [
   "pytest>=8.0",
   "ruff>=0.8",
