@@ -15,6 +15,7 @@ from vs_pipeline.stages.fusion import (
     invert_orientation,
     opening_dict,
     project_box_footprint,
+    ray_plane_lift,
     vote_box,
     yup_to_zup_points,
     zup_to_yup_points,

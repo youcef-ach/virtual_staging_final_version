@@ -3,10 +3,17 @@
 Core constraint: the G4 G-buffers store PROXY depth (shell + detail boxes),
 not true scene depth. Fusion direction therefore depends on class:
 
-1. Wall-borne classes 2D->3D (window/door): proxy depth at those pixels
-   correctly lands on the wall plane, so mask pixels lift through
-   ``depth_to_worldpos`` and accumulate per-wall-plane (u, v) occupancy
-   across sweeps -> opening rectangles (openings.py-compatible schema).
+1. Wall-borne classes 2D->3D (window/door): mask pixels lift by DIRECT
+   RAY-PLANE INTERSECTION -- camera + pixel ray -> nearest wall plane whose
+   boundary bbox contains the hit -- with proxy depth demoted to an
+   OCCLUSION GATE: the ray must reach the plane at or before the proxy hit
+   (+ slack). Doors pass because the G3 proxy has door HOLES (the proxy hit
+   lies beyond the plane); windows pass because the proxy has no window
+   holes yet (hit ON the plane); occluding walls block. Lifting through
+   proxy depth was wrong exactly for doors: rays pass through the G3 holes
+   and land on geometry in the room behind (first run: 0/54 door match).
+   Occupancy accumulates per wall plane (u, v) across sweeps -> opening
+   rectangles (openings.py-compatible schema).
 2. Volumetric classes 3D->2D (furniture): lifting furniture pixels through
    proxy depth would land BEHIND the furniture wherever no detail proxy
    exists. Instead the G2 residual-cluster boxes are the 3D evidence: each
@@ -14,9 +21,19 @@ not true scene depth. Fusion direction therefore depends on class:
    -> labeled 3D boxes (the Year-2 SAM-prompt / room-emptying schema).
 3. Mirror detector (OPEN_PROBLEMS #2 candidate): coherent components where
    the 2D masks say room content (floor/ceiling/furniture) but proxy depth
-   agrees with a wall plane => mirror. Known false-positive mode: furniture
-   tight against a wall WITHOUT a detail proxy also reads as on-wall --
-   the detector is review-driven; tune from the 152/157 acid test.
+   agrees with a wall plane => mirror. v2 NORMAL GATE: the rendered proxy
+   normal must belong to a VERTICAL surface ALIGNED with the assigned wall
+   plane -- kills wall-top ceiling strips (normal down) and horizontal rims
+   (normal up), the dominant 152/157 false positives. Residual FP mode:
+   furniture tight against a wall WITHOUT a detail proxy. Real mirrors
+   labeled `wall` by Mask2Former are structurally MISSED (never enter the
+   candidate set) -- needs raw-ADE reflected-content evidence (next
+   iteration).
+
+Review: accepted opening rects are REPROJECTED onto the pano faces
+(occlusion-gated; the F5 ghosting-proof philosophy -- evidence drawn over
+the photograph). The per-plane (u, v) grids remain as secondary evidence
+maps.
 
 Pixel alignment: masks are stored in the canonical (stored) face layout,
 pixel-aligned with the extracted faces. The LOCKED F5 calibration maps each
@@ -47,7 +64,11 @@ from typing import Any
 import cv2
 import numpy as np
 
-from vs_pipeline.stages.gbuffer import _load_depth, depth_to_worldpos
+from vs_pipeline.stages.gbuffer import (
+    _load_depth,
+    depth_to_worldpos,
+    face_ray_directions,
+)
 from vs_pipeline.stages.pose_qa import _ROT_K, apply_orientation
 from vs_pipeline.stages.segmentation import CLASS_IDS, CLASSES, FACE_NAMES
 
@@ -55,12 +76,15 @@ FUSION_SCHEMA_VERSION = 1
 
 #: Occupancy grid resolution on wall planes (matches openings.py GRID_M).
 GRID_M = 0.05
-#: Max distance from a lifted point to a wall plane to count toward it.
-PLANE_DIST_MAX_M = 0.15
 #: (u, v) slack outside the wall boundary bbox.
 PLANE_UV_PAD_M = 0.2
 #: Proxy depth validity window (Cycles no-hit depth is huge).
 DEPTH_VALID_MAX_M = 100.0
+#: Ray-plane lift: minimum hit distance (self-hit guard) and the occlusion
+#: slack (proxy hit may be up to this much SHORT of the plane and still pass;
+#: door holes put the proxy hit BEYOND the plane, which always passes).
+RAY_MIN_T_M = 0.3
+RAY_BLOCK_SLACK_M = 0.25
 #: Opening acceptance gates on the extracted rect.
 OPENING_MIN_DIM_M = 0.30
 OPENING_MIN_AREA_M2 = 0.15
@@ -84,6 +108,9 @@ OCCLUSION_SLACK_M = 0.3
 MIRROR_CANDIDATE_CLASSES = ("floor", "ceiling", "furniture")
 MIRROR_WALL_DIST_M = 0.12
 MIRROR_MIN_AREA_FRAC = 0.005  # of the face area
+#: v2 normal gate: proxy normal must be vertical-surface and wall-aligned.
+MIRROR_NORMAL_MAX_Y = 0.3
+MIRROR_NORMAL_ALIGN_MIN = 0.7
 
 
 # ------------------------------------------------------------------ frames & alignment
@@ -210,6 +237,82 @@ def assign_to_walls(
         best[ok] = i
         best_d[ok] = dist[ok]
     return best, best_d
+
+
+def ray_plane_lift(
+    cam_matrix: np.ndarray,
+    cls_render: np.ndarray,
+    depth_raw: np.ndarray,
+    walls: list[WallPlane],
+    class_id: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Lift class pixels onto wall planes by DIRECT ray-plane intersection.
+
+    Works in RENDER pixel space (Matterport-frame camera, 90-deg pinhole,
+    matching gbuffer.face_ray_directions exactly). For every pixel of
+    ``class_id``, cast its ray and intersect with each wall plane; keep the
+    NEAREST plane whose hit passes all gates:
+
+    - finite t >= RAY_MIN_T_M, non-parallel ray;
+    - (u, v) inside the wall boundary bbox (+ pad) -- bleeding guard; a
+      nearer plane failing this gate does NOT block a farther passing one
+      (the physical ray continues past a wall's lateral extent);
+    - occlusion gate: the proxy depth along the ray must not be clearly
+      SHORTER than t. Proxy hits AT the plane (windows: the proxy has no
+      window holes yet) and BEYOND it (doors: the G3 door hole lets the ray
+      through) both pass; an occluding wall in front blocks.
+
+    Returns (points_yup (N, 3), wall_index (N,)).
+    """
+    empty = (np.zeros((0, 3)), np.zeros(0, dtype=np.int64))
+    sel = np.asarray(cls_render) == class_id
+    if not bool(sel.any()) or not walls:
+        return empty
+    size = int(cls_render.shape[0])
+    dirs = face_ray_directions(size)[sel]
+    depth = np.asarray(depth_raw, dtype=np.float64)[sel]
+    if dirs.shape[0] > MAX_POINTS_PER_FACE:
+        step = dirs.shape[0] // MAX_POINTS_PER_FACE + 1
+        dirs = dirs[::step]
+        depth = depth[::step]
+    cam = np.asarray(cam_matrix, dtype=np.float64)
+    d_yup = zup_to_yup_points(dirs @ cam[:3, :3].T)
+    p0 = zup_to_yup_points(cam[:3, 3])
+    depth_ok = np.isfinite(depth) & (depth > 0.0) & (depth < DEPTH_VALID_MAX_M)
+    n = d_yup.shape[0]
+    best_t = np.full(n, np.inf)
+    best_w = np.full(n, -1, dtype=np.int64)
+    for i, w in enumerate(walls):
+        denom = d_yup @ w.normal
+        with np.errstate(divide="ignore", invalid="ignore"):
+            t = -(float(p0 @ w.normal) + w.d) / denom
+        ok = (
+            (np.abs(denom) > 1e-6)
+            & np.isfinite(t)
+            & (t >= RAY_MIN_T_M)
+            & (t < best_t)
+        )
+        if not bool(ok.any()):
+            continue
+        idx = np.where(ok)[0]
+        pts = p0 + d_yup[idx] * t[idx, None]
+        rel = pts - w.origin
+        u = rel @ w.u_axis
+        v = rel @ w.v_axis
+        inside = (
+            (u >= w.u_range[0] - PLANE_UV_PAD_M)
+            & (u <= w.u_range[1] + PLANE_UV_PAD_M)
+            & (v >= w.v_range[0] - PLANE_UV_PAD_M)
+            & (v <= w.v_range[1] + PLANE_UV_PAD_M)
+        )
+        unblocked = (~depth_ok[idx]) | (depth[idx] >= t[idx] - RAY_BLOCK_SLACK_M)
+        keep = idx[inside & unblocked]
+        best_t[keep] = t[keep]
+        best_w[keep] = i
+    hit = best_w >= 0
+    if not bool(hit.any()):
+        return empty
+    return p0 + d_yup[hit] * best_t[hit, None], best_w[hit]
 
 
 # ------------------------------------------------------------------ opening accumulation
@@ -410,15 +513,44 @@ def detect_mirror_mask(
     world_yup: np.ndarray,
     walls: list[WallPlane],
     min_area_px: int,
+    normals_yup: np.ndarray | None = None,
 ) -> np.ndarray:
-    """Candidate (room-content) pixels whose position sits ON a wall plane."""
+    """Room-content pixels whose proxy hit sits ON a wall plane => mirror.
+
+    v2 normal gate (active when the normal G-buffer is available): the
+    rendered proxy normal at the pixel must belong to a VERTICAL surface
+    (|n_y| <= MIRROR_NORMAL_MAX_Y) ALIGNED with the assigned wall's normal
+    (|dot| >= MIRROR_NORMAL_ALIGN_MIN). This kills the two dominant false
+    positives from the first 152/157 run: wall-top ceiling strips (normal
+    points down) and horizontal rims like bathtub edges / toilet bases
+    (normal points up). Wall-tight furniture without a detail proxy remains
+    the known residual false-positive mode.
+    """
     out = np.zeros(cand_mask.shape, dtype=bool)
     if not bool(cand_mask.any()) or not walls:
         return out
     pts = world_yup[cand_mask]
     best, _ = assign_to_walls(pts, walls, MIRROR_WALL_DIST_M)
+    on_wall = best >= 0
+    if normals_yup is not None:
+        nrm = np.asarray(normals_yup[cand_mask], dtype=np.float64)
+        length = np.linalg.norm(nrm, axis=-1)
+        ok_len = length > 0.5
+        unit = np.zeros_like(nrm)
+        unit[ok_len] = nrm[ok_len] / length[ok_len, None]
+        vertical = np.abs(unit[:, 1]) <= MIRROR_NORMAL_MAX_Y
+        wall_normals = np.zeros_like(nrm)
+        assigned = best >= 0
+        if bool(assigned.any()):
+            wn = np.stack([w.normal for w in walls])
+            wall_normals[assigned] = wn[best[assigned]]
+        aligned = (
+            np.abs(np.einsum("ij,ij->i", unit, wall_normals))
+            >= MIRROR_NORMAL_ALIGN_MIN
+        )
+        on_wall = on_wall & ok_len & vertical & aligned
     flat = np.zeros(cand_mask.shape, dtype=np.uint8)
-    flat[cand_mask] = (best >= 0).astype(np.uint8)
+    flat[cand_mask] = on_wall.astype(np.uint8)
     n, labels, stats, _ = cv2.connectedComponentsWithStats(flat, connectivity=8)
     for i in range(1, n):
         if int(stats[i, cv2.CC_STAT_AREA]) >= min_area_px:
@@ -437,6 +569,35 @@ def _load_cls(seg_dir: Path, uuid: str, face: str) -> np.ndarray | None:
             if img is not None:
                 return img
     return None
+
+
+def _load_normal(path: Path) -> np.ndarray | None:
+    """Load a world-space normal map (H, W, 3), XYZ channel order.
+
+    Mirrors gbuffer._load_depth's fallback chain: .npy sibling first (the
+    renderer writes RGB via its bpy round-trip), then cv2 (EXR decodes as
+    BGR -> reversed to RGB), then imageio (RGB). The verticality gate
+    (|n_y|) only reads the middle channel and is therefore channel-order
+    robust; the alignment gate assumes XYZ.
+    """
+    npy = path.with_suffix(".npy")
+    if npy.is_file():
+        arr = np.load(str(npy))
+        if arr.ndim == 3 and arr.shape[2] >= 3:
+            return np.asarray(arr[..., :3], dtype=np.float64)
+        return None
+    img = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
+    if img is not None and img.ndim == 3 and img.shape[2] >= 3:
+        return np.asarray(img[..., 2::-1], dtype=np.float64)  # BGR -> RGB
+    try:
+        import imageio.v3 as iio
+
+        img = iio.imread(str(path))
+    except BaseException:
+        return None
+    if img is None or img.ndim != 3 or img.shape[2] < 3:
+        return None
+    return np.asarray(img[..., :3], dtype=np.float64)
 
 
 def _grid_review(acc: PlaneAccumulator, rects_by_kind: dict[str, list], path: Path) -> None:
@@ -458,6 +619,103 @@ def _grid_review(acc: PlaneAccumulator, rects_by_kind: dict[str, list], path: Pa
         vis, (acc.nv * scale, acc.nu * scale), interpolation=cv2.INTER_NEAREST
     )
     cv2.imwrite(str(path), vis)
+
+
+def _reproject_openings_review(
+    openings: list[dict[str, Any]],
+    metas: list[dict[str, Any]],
+    cams_by_uuid: dict[str, Any],
+    mapping: dict[str, Any],
+    renders_dir: Path,
+    panos_dir: Path,
+    review_dir: Path,
+) -> int:
+    """Draw accepted opening rects over the pano faces (ghosting-proof style).
+
+    Rect corners project through each face camera in RENDER space (occlusion
+    gate at the rect center, same rule as the lift); the drawn canvas is then
+    oriented into the stored face layout and overlaid on the photograph --
+    correctness is judged against the actual window/door in the photo.
+    Returns the number of review images written.
+    """
+    color = {"window": (0, 220, 250), "door": (40, 140, 245)}  # BGR
+    written = 0
+    for meta in metas:
+        uuid = str(meta["sweep_uuid"])
+        idx = int(meta["index"])
+        cam_entry = cams_by_uuid.get(uuid)
+        if cam_entry is None:
+            continue
+        for face in FACE_NAMES:
+            m = mapping.get(face)
+            if not m:
+                continue
+            render_face = str(m["render_face"])
+            op = str(m["op"])
+            depth_raw = _load_depth(renders_dir / uuid / f"{render_face}_depth.exr")
+            if depth_raw is None:
+                continue
+            size = int(depth_raw.shape[0])
+            cam = np.asarray(cam_entry["faces"][render_face], dtype=np.float64)
+            inv = np.linalg.inv(cam)
+            canvas = np.zeros((size, size, 3), dtype=np.uint8)
+            drawn = 0
+            for o in openings:
+                corners = np.asarray(o["corners_3d"], dtype=np.float64)
+                c = yup_to_zup_points(corners) @ inv[:3, :3].T + inv[:3, 3]
+                if not bool((c[:, 2] < -1e-6).all()):
+                    continue
+                col = (c[:, 0] / -c[:, 2] + 1.0) / 2.0 * size
+                row = (1.0 - c[:, 1] / -c[:, 2]) / 2.0 * size
+                if (
+                    col.max() < 0
+                    or col.min() >= size
+                    or row.max() < 0
+                    or row.min() >= size
+                ):
+                    continue
+                cc = int(np.clip(round(float(col.mean())), 0, size - 1))
+                rr = int(np.clip(round(float(row.mean())), 0, size - 1))
+                dist = float(np.linalg.norm(c.mean(axis=0)))
+                d = float(depth_raw[rr, cc])
+                if (
+                    np.isfinite(d)
+                    and 0.0 < d < DEPTH_VALID_MAX_M
+                    and d < dist - RAY_BLOCK_SLACK_M
+                ):
+                    continue  # occluded from this face
+                lim = 8 * size
+                pts = np.stack(
+                    [np.clip(col, -lim, lim), np.clip(row, -lim, lim)], axis=-1
+                ).astype(np.int32)
+                cv2.polylines(
+                    canvas, [pts.reshape(-1, 1, 2)], True, color[o["kind"]], 2
+                )
+                drawn += 1
+            if not drawn:
+                continue
+            canvas_ext = np.ascontiguousarray(apply_orientation(canvas, op))
+            pano = cv2.imread(str(panos_dir / uuid / f"{face}.jpg"), cv2.IMREAD_COLOR)
+            if pano is None:
+                continue
+            pano = cv2.resize(pano, (size, size))
+            mask = canvas_ext.any(axis=-1)
+            out = pano.copy()
+            out[mask] = canvas_ext[mask]
+            cv2.putText(
+                out,
+                f"[{idx:03d}] {face}: {drawn} opening(s) (window=yellow, door=orange)",
+                (8, 24),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (0, 255, 255),
+                2,
+                cv2.LINE_AA,
+            )
+            review_dir.mkdir(parents=True, exist_ok=True)
+            cv2.imwrite(str(review_dir / f"openings_{idx:03d}_{face}.png"), out)
+            written += 1
+    return written
 
 
 def run(
@@ -496,6 +754,7 @@ def run(
     box_votes = np.zeros((len(boxes), len(CLASSES)), dtype=np.int64)
     box_views = np.zeros(len(boxes), dtype=np.int64)
     mirror_stats: list[dict[str, Any]] = []
+    normals_missing = 0
     out_dir.mkdir(parents=True, exist_ok=True)
     mirror_dir = out_dir / "mirror_masks"
     review_dir = out_dir / "review"
@@ -525,27 +784,30 @@ def run(
             size = int(depth_raw.shape[0])
             cam = np.asarray(cam_entry["faces"][render_face], dtype=np.float64)
             cls_r = cv2.resize(cls, (size, size), interpolation=cv2.INTER_NEAREST)
+            cls_render = np.ascontiguousarray(invert_orientation(cls_r, op))
             world, valid = aligned_worldpos_yup(depth_raw, cam, op)
 
-            # --- wall-borne 2D->3D: window/door occupancy
+            # --- wall-borne 2D->3D: ray-plane lift (proxy depth = occlusion gate)
             for kind, cid in kind_ids.items():
-                sel = (cls_r == cid) & valid
-                if not bool(sel.any()):
-                    continue
-                pts = world[sel]
-                if pts.shape[0] > MAX_POINTS_PER_FACE:
-                    step = pts.shape[0] // MAX_POINTS_PER_FACE + 1
-                    pts = pts[::step]
-                best, _dist = assign_to_walls(pts, walls, PLANE_DIST_MAX_M)
-                for wi in np.unique(best[best >= 0]):
+                pts, widx = ray_plane_lift(cam, cls_render, depth_raw, walls, cid)
+                for wi in np.unique(widx):
                     w = walls[int(wi)]
                     acc = accs.setdefault(w.plane_id, PlaneAccumulator(w))
-                    acc.add(kind, pts[best == wi], uuid)
+                    acc.add(kind, pts[widx == wi], uuid)
 
-            # --- mirror detector (extracted-face space)
+            # --- mirror detector (extracted-face space, v2 normal gate)
+            normals_yup = None
+            nrm_render = _load_normal(
+                renders_dir / uuid / f"{render_face}_normal.exr"
+            )
+            if nrm_render is not None and nrm_render.shape[0] == size:
+                nrm_ext = np.ascontiguousarray(apply_orientation(nrm_render, op))
+                normals_yup = zup_to_yup_points(nrm_ext)
+            else:
+                normals_missing += 1
             cand = np.isin(cls_r, cand_ids) & valid
             min_area = int(MIRROR_MIN_AREA_FRAC * size * size)
-            mirror = detect_mirror_mask(cand, world, walls, min_area)
+            mirror = detect_mirror_mask(cand, world, walls, min_area, normals_yup)
             frac = float(mirror.mean())
             sweep_mirror[face] = frac
             if bool(mirror.any()):
@@ -579,7 +841,6 @@ def run(
                         )
 
             # --- volumetric 3D->2D: box voting (render space)
-            cls_render = np.ascontiguousarray(invert_orientation(cls_r, op))
             for b_i, box in enumerate(boxes):
                 votes = vote_box(
                     cam, depth_raw, cls_render, box["bbox_min"], box["bbox_max"]
@@ -595,6 +856,11 @@ def run(
         print(
             f"[{idx:03d}] {uuid}: {faces_done} face(s) fused, "
             f"mirror on {len(mirror_faces)} face(s)"
+        )
+    if normals_missing:
+        print(
+            f"WARNING: {normals_missing} face(s) had no readable normal map -> "
+            "mirror normal gate skipped there (expect more false positives)"
         )
 
     # --- finalize openings
@@ -620,6 +886,13 @@ def run(
         if write_review and any(rects_by_kind.values()):
             review_dir.mkdir(parents=True, exist_ok=True)
             _grid_review(acc, rects_by_kind, review_dir / f"plane_{plane_id}.png")
+
+    # --- reproject accepted rects onto the pano faces (primary review)
+    if write_review and openings:
+        n_imgs = _reproject_openings_review(
+            openings, metas, cams_by_uuid, mapping, renders_dir, panos_dir, review_dir
+        )
+        print(f"opening reprojection review: {n_imgs} image(s) -> {review_dir}")
 
     # --- optional cross-check vs G3 jamb-detected doors
     door_matches = None
@@ -677,8 +950,10 @@ def run(
     elapsed = time.perf_counter() - t0
     params = {
         "grid_m": GRID_M,
-        "plane_dist_max_m": PLANE_DIST_MAX_M,
+        "wall_lift": "ray_plane_v2",
+        "ray_block_slack_m": RAY_BLOCK_SLACK_M,
         "mirror_wall_dist_m": MIRROR_WALL_DIST_M,
+        "mirror_normal_gate": True,
         "furniture_confirm_fraction": FURNITURE_CONFIRM_FRACTION,
     }
     windows = sum(1 for o in openings if o["kind"] == "window")
