@@ -165,3 +165,57 @@ def test_upright_round_trip_all_faces():
         for face in FACE_NAMES
     )
     assert changed
+
+
+def test_refine_current_idempotency_and_legacy_invalidation(tmp_path):
+    # The refine idempotency test slice 2 claimed but never shipped -- and the
+    # identity-bump contract: a legacy meta written before the upright fix
+    # (params without the 'upright' key) must NEVER read as current.
+    from vs_pipeline.stages.segmentation import RefineParams, _refine_current
+
+    params = RefineParams()
+    sweep_out = tmp_path / "sweep-a"
+    sweep_out.mkdir()
+    meta_path = sweep_out / "refine_meta.json"
+    files = {"faces": {}}
+    for face in FACE_NAMES:
+        (sweep_out / f"{face}_cls_refined.png").write_bytes(b"x")
+        files["faces"][face] = f"{face}_cls_refined.png"
+    meta_path.write_text(
+        json.dumps({"params": params.to_dict(), "files": files}), encoding="utf-8"
+    )
+    assert _refine_current(meta_path, sweep_out, params)
+    # Different params (e.g. vit_h worker upgrade) -> must re-refine.
+    assert not _refine_current(meta_path, sweep_out, RefineParams(sam_model="vit_h"))
+    # Legacy meta (pre-upright-fix): no 'upright' key -> must re-refine.
+    legacy = params.to_dict()
+    del legacy["upright"]
+    meta_path.write_text(
+        json.dumps({"params": legacy, "files": files}), encoding="utf-8"
+    )
+    assert not _refine_current(meta_path, sweep_out, params)
+    # Missing output file -> must re-refine.
+    meta_path.write_text(
+        json.dumps({"params": params.to_dict(), "files": files}), encoding="utf-8"
+    )
+    (sweep_out / "px_cls_refined.png").unlink()
+    assert not _refine_current(meta_path, sweep_out, params)
+
+
+def test_legacy_infer_meta_invalidates_on_upright_bump(tmp_path):
+    # Same contract for infer: pre-upright-fix seg_meta.json (params without
+    # 'upright') must never be treated as up to date by the fixed code.
+    params = SegParams(model_name="m", mask_size=64)
+    sweep_out = tmp_path / "sweep-b"
+    sweep_out.mkdir()
+    meta_path = sweep_out / "seg_meta.json"
+    files = {"faces": {}}
+    for face in FACE_NAMES:
+        for kind in ("ade", "cls"):
+            (sweep_out / f"{face}_{kind}.png").write_bytes(b"x")
+        files["faces"][face] = {"ade": f"{face}_ade.png", "cls": f"{face}_cls.png"}
+    legacy = {"model_name": "m", "mask_size": 64}  # exact pre-fix params dict
+    meta_path.write_text(
+        json.dumps({"params": legacy, "files": files}), encoding="utf-8"
+    )
+    assert not _outputs_current(meta_path, sweep_out, params)
