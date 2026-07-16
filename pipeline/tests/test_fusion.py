@@ -146,7 +146,7 @@ def test_project_box_footprint_in_front_and_behind():
 
 def test_vote_box_counts_and_occlusion_guard():
     cam, bmin, bmax = _identity_cam_box()
-    size = 64
+    size = 256
     cls_render = np.full((size, size), CLASS_IDS["furniture"], dtype=np.uint8)
     depth_far = np.full((size, size), 10.0)
     votes = vote_box(cam, depth_far, cls_render, bmin, bmax)
