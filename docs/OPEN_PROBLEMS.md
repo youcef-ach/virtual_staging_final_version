@@ -54,6 +54,18 @@ rely on the raw ADE map alone. Critically, mirrors are NOT labeled window
 candidate): pixels whose 2D label says room content (furniture/floor/
 ceiling) but whose G-buffer depth lands ON a wall plane = mirror
 reflection — cheap, uses data we already bake.
+OBSERVATION (2026-07-16, G6 slice 3 first fusion run, 152/157): the
+depth-agreement mirror detector v1 (any floor/ceiling/furniture pixel
+≤ 0.12 m from a wall plane) fired on bathtub rims, toilet bases and
+wall-top ceiling strips while MISSING the real vanity mirrors (their
+pixels are labeled wall by Mask2Former → they never enter the candidate
+set). v2 adds a normal gate from the normal G-buffer (proxy normal must
+be vertical AND wall-aligned), killing the rim/ceiling-strip FPs;
+wall-tight proxy-less furniture remains the residual FP mode. The
+real-mirror MISS is structural: detection needs raw-ADE
+reflected-content evidence inside wall-labeled regions (coherent
+non-wall ADE content in a wall-labeled component whose depth agrees
+with the plane) — queued as the next detector iteration.
 - Research: “glass detection terrestrial laser scanning”, “specular/mirror
   artifact removal LiDAR indoor”, “transparent surface reconstruction”;
   also G6 (Mask2Former window class) can feed masks back into Gate 1 and G2.

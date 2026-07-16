@@ -175,3 +175,68 @@ def test_detect_mirror_mask_on_wall_component():
     assert not bool(mask[0:4].any())
     # Without walls, nothing fires.
     assert not detect_mirror_mask(cand, world, [], min_area_px=50).any()
+
+
+def test_detect_mirror_normal_gate():
+    """v2 normal gate: only VERTICAL surfaces ALIGNED with the assigned wall
+    survive -- ceiling strips (normal down), horizontal rims (normal up) and
+    perpendicular vertical surfaces are rejected even when the position sits
+    exactly on the wall plane."""
+    wall = _wall_x0()  # normal +X
+    size = 32
+    world = np.zeros((size, size, 3))
+    world[..., 0] = 0.02  # every pixel ON the wall plane
+    world[..., 1] = 1.5
+    world[..., 2] = 2.0
+    cand = np.ones((size, size), dtype=bool)
+    normals = np.zeros((size, size, 3))
+    normals[:8] = [1.0, 0.0, 0.0]  # wall-aligned vertical -> mirror candidate
+    normals[8:16] = [0.0, 0.0, 1.0]  # vertical but PERPENDICULAR -> rejected
+    normals[16:24] = [0.0, -1.0, 0.0]  # ceiling strip (points down) -> rejected
+    normals[24:] = [0.0, 1.0, 0.0]  # horizontal rim (points up) -> rejected
+    mask = detect_mirror_mask(cand, world, [wall], min_area_px=10, normals_yup=normals)
+    assert bool(mask[:8].all())
+    assert not bool(mask[8:].any())
+    # Without normals the gate is skipped -> everything on-wall fires (v1).
+    v1 = detect_mirror_mask(cand, world, [wall], min_area_px=10)
+    assert bool(v1.all())
+
+
+def test_ray_plane_lift_door_hole_occluder_nearest():
+    """Door case: proxy depth BEYOND the plane (ray through the G3 door
+    hole) must still land the lift ON the plane; a proxy hit clearly in
+    FRONT blocks; the nearest passing plane wins."""
+    def _wall(depth_y: float) -> WallPlane:
+        # Horizontal-normal test plane at y_yup = -depth_y, facing +Y.
+        return WallPlane(
+            plane_id=f"w{depth_y}",
+            normal=np.array([0.0, 1.0, 0.0]),
+            d=depth_y,
+            origin=np.array([0.0, -depth_y, 0.0]),
+            u_axis=np.array([1.0, 0.0, 0.0]),
+            v_axis=np.array([0.0, 0.0, 1.0]),
+            u_range=(-8.0, 8.0),
+            v_range=(-8.0, 8.0),
+        )
+
+    wall = _wall(3.0)
+    cam = np.eye(4)  # Matterport frame, looking down -Z_mp = -Y_yup
+    size = 16
+    cls = np.full((size, size), CLASS_IDS["door"], dtype=np.uint8)
+    # Proxy hit at 5 m: BEYOND the 3 m plane (door hole) -> passes.
+    depth_beyond = np.full((size, size), 5.0)
+    pts, widx = ray_plane_lift(cam, cls, depth_beyond, [wall], CLASS_IDS["door"])
+    assert pts.shape[0] == size * size
+    assert np.allclose(pts[:, 1], -3.0, atol=1e-9)
+    assert bool((widx == 0).all())
+    # Proxy hit at 1 m: an occluding wall in FRONT of the plane -> blocked.
+    depth_front = np.full((size, size), 1.0)
+    pts2, _ = ray_plane_lift(cam, cls, depth_front, [wall], CLASS_IDS["door"])
+    assert pts2.shape[0] == 0
+    # Nearest passing plane wins over a farther coplanar-family plane.
+    far_wall = _wall(4.5)
+    pts3, widx3 = ray_plane_lift(
+        cam, cls, depth_beyond, [far_wall, wall], CLASS_IDS["door"]
+    )
+    assert bool((widx3 == 1).all())
+    assert np.allclose(pts3[:, 1], -3.0, atol=1e-9)
