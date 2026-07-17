@@ -35,6 +35,12 @@ export interface SweepData {
   index: number;
   /** Sweep position in the runtime Y-up frame (meters). */
   position: readonly [number, number, number];
+  /**
+   * 3x3 rotation block of pose_rt (row-major, column convention:
+   * d_world = R * d_local). The panos are stored in the sweep-LOCAL frame,
+   * so the viewer must rotate sampling directions world->local per sweep.
+   */
+  rotation: readonly (readonly number[])[];
   faces: Record<string, string>;
 }
 

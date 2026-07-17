@@ -38,6 +38,11 @@ export async function loadTour(baseUrl: string): Promise<TourData> {
       uuid: entry.sweep_uuid,
       index: entry.index,
       position: [pose.pose_rt[0][3], pose.pose_rt[1][3], pose.pose_rt[2][3]],
+      rotation: [
+        [pose.pose_rt[0][0], pose.pose_rt[0][1], pose.pose_rt[0][2]],
+        [pose.pose_rt[1][0], pose.pose_rt[1][1], pose.pose_rt[1][2]],
+        [pose.pose_rt[2][0], pose.pose_rt[2][1], pose.pose_rt[2][2]],
+      ],
       faces: entry.faces,
     });
   }
