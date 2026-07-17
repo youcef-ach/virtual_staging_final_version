@@ -23,11 +23,19 @@ stored ENCODED ((n+1)/2 in 0..1); an encoded down-normal (0,0,−1) becomes
 diagnostics (min/max/median-length) before any logic is trusted.
 **Fix record:** `fusion._decode_normals` auto-detects and decodes
 (no negatives AND median length away from 1 ⇒ encoded → 2v−1) + one-time
-diagnostic print. PENDING (2026-07-17): if the next run confirms encoding,
-fix at SOURCE in `render_gbuffer.py` (write raw signed normals, npy
-siblings included) and drop the consumer-side decode — every future
-normal consumer (relighting, re-texturing, BIM face orientation) would
-otherwise need the same workaround.
+diagnostic print.
+**Outcome (2026-07-17):** UNSETTLED — the heuristic never triggered a
+decode AND the one-time diagnostic fired on an empty outdoor face (all
+zeros), wasting the read (fixed: diagnostics skip degenerate inputs).
+Two sub-lessons banked: (a) auto-detection heuristics on mixed content
+can be inconclusive (encoded mixed scenes can median near 1.0) — value
+semantics must ultimately be verified at the SOURCE (the
+`render_gbuffer.py` write path), not inferred downstream; (b) one-time
+diagnostics must validate their sample is non-degenerate before
+spending the print. The mirror detector that motivated this was parked
+(OPEN_PROBLEMS #2); resolve the encoding question at the renderer
+before the NEXT normal consumer (relighting, re-texturing, BIM face
+orientation) is built.
 
 ### L2. Consumers of PROXY depth must respect its intentional holes
 G3 cuts door openings into the proxy, so “lift through depth” sends door

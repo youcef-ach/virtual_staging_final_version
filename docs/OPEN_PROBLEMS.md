@@ -66,6 +66,22 @@ real-mirror MISS is structural: detection needs raw-ADE
 reflected-content evidence inside wall-labeled regions (coherent
 non-wall ADE content in a wall-labeled component whose depth agrees
 with the plane) — queued as the next detector iteration.
+FINAL STATUS (2026-07-17): the depth-agreement mirror detector is
+PARKED AS RESEARCH after three iterations (v1 raw, v2 normal gate,
+v2 + auto-decode). The premise is insufficient, not mistuned:
+(a) real mirrors are UNREACHABLE — Mask2Former labels mirror surfaces
+`wall`, so they never enter the room-content candidate set;
+(b) wall-tight vertical furniture (tub sides, toilet) legitimately
+passes a perfect normal gate wherever no detail proxy exists — it IS
+a vertical surface on the wall plane. The normal-encoding question
+(G4 normal passes possibly stored (n+1)/2) remains unsettled and
+should be resolved at the renderer source when normals next matter.
+Next research candidates beyond the listed ones: raw-ADE
+reflected-content evidence INSIDE wall-labeled components (coherent
+furniture/floor ADE content within a wall-labeled region whose depth
+agrees with the plane); mirror-symmetry cues (reflected content
+correlates with a flipped view of the room); learned mirror
+segmentation (MirrorNet / PMD-style models).
 - Research: “glass detection terrestrial laser scanning”, “specular/mirror
   artifact removal LiDAR indoor”, “transparent surface reconstruction”;
   also G6 (Mask2Former window class) can feed masks back into Gate 1 and G2.
