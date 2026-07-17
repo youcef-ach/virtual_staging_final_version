@@ -48,6 +48,7 @@ export default function App() {
         const viewer = new TourViewer(engine, tour);
         viewerRef.current = viewer;
         viewer.onSweepShown = (uuid) => useViewerStore.getState().setActiveSweep(uuid);
+        store.setSkyboxYaw(viewer.skyboxYawDeg);
 
         // G7: Layer 2 (proxy occluders) + Layer 3 (staged asset). Missing
         // files degrade gracefully -- the tour keeps working either way.
@@ -57,12 +58,12 @@ export default function App() {
             `${DATA_BASE_URL}/proxy_shell.glb`,
             `${DATA_BASE_URL}/proxy_details.glb`,
           ])
-          .then(({ count, failed }) => {
+          .then(({ count, floors, failed }) => {
             useViewerStore
               .getState()
               .setProxyState(
                 count > 0
-                  ? `proxy \u2713 ${count} meshes${failed.length ? ` (${failed.length} file missing)` : ""}`
+                  ? `proxy \u2713 ${count} meshes \u00b7 ${floors} floors${failed.length ? ` (${failed.length} file missing)` : ""}`
                   : "proxy \u2717 copy proxy_shell.glb (+ proxy_details.glb) into viewer/public/data/",
               );
           });
