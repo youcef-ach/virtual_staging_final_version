@@ -176,6 +176,8 @@ export default function App() {
         {activeIndex !== undefined && <span>sweep #{String(activeIndex).padStart(3, "0")}</span>}
         {proxyState && <span>{proxyState}</span>}
         {assetState && <span>{assetState}</span>}
+        {skyboxYawDeg !== null && <span>pano yaw {skyboxYawDeg}\u00b0 (O)</span>}
+        {xray && <span>X-RAY (X)</span>}
       </div>
 
       {status === "loading" && <div className="overlay">Loading tour\u2026</div>}
