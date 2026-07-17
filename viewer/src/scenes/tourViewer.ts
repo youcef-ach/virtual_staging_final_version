@@ -112,14 +112,28 @@ export class TourViewer {
     return this.camera;
   }
 
-  /** Current residual yaw candidate (degrees, G7.1 calibration harness). */
+  /** Effective residual yaw (coarse candidate + fine offset), degrees. */
   get skyboxYawDeg(): number {
-    return SKYBOX_YAW_CANDIDATES_DEG[this.yawIndex];
+    return SKYBOX_YAW_CANDIDATES_DEG[this.yawIndex] + this.yawFineDeg;
   }
 
-  /** Cycle the residual yaw candidate (O key). Returns the new value in degrees. */
+  /** Cycle the coarse residual yaw candidate (O key). Returns effective degrees. */
   cycleSkyboxYaw(): number {
     this.yawIndex = (this.yawIndex + 1) % SKYBOX_YAW_CANDIDATES_DEG.length;
+    this.applySkyboxOrientation(this.activeTexture);
+    return this.skyboxYawDeg;
+  }
+
+  /**
+   * Fine residual yaw nudge ([ / ] keys; { / } = coarse 15-deg steps): fit the
+   * exact offset per sweep. A constant offset that repeats at every sweep is a
+   * lockable calibration; FITTED VALUES THAT DIFFER PER SWEEP mean the
+   * per-sweep rotation source is wrong (transposed interpretation, or the
+   * panos carry images2D poses that differ from the scan-header poses) and
+   * the fitted numbers themselves are the diagnosis.
+   */
+  nudgeYawFine(deltaDeg: number): number {
+    this.yawFineDeg += deltaDeg;
     this.applySkyboxOrientation(this.activeTexture);
     return this.skyboxYawDeg;
   }

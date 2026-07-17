@@ -135,6 +135,18 @@ export default function App() {
             case "D":
               staging.toggleDetails();
               break;
+            case "[":
+              useViewerStore.getState().setSkyboxYaw(viewer.nudgeYawFine(-2));
+              break;
+            case "{":
+              useViewerStore.getState().setSkyboxYaw(viewer.nudgeYawFine(-15));
+              break;
+            case "]":
+              useViewerStore.getState().setSkyboxYaw(viewer.nudgeYawFine(2));
+              break;
+            case "}":
+              useViewerStore.getState().setSkyboxYaw(viewer.nudgeYawFine(15));
+              break;
             default:
               return;
           }
