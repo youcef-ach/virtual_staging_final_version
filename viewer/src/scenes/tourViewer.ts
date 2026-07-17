@@ -71,6 +71,7 @@ export class TourViewer {
   private yaw = 0;
   private pitch = 0;
   private yawIndex = DEFAULT_YAW_INDEX;
+  private yawFineDeg = 0;
   private currentPoseRotation: Matrix = Matrix.Identity();
   private invertRotation = false;
   private detachControls: (() => void) | null = null;
