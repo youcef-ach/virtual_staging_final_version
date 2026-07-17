@@ -12,8 +12,13 @@ Design (PLAN.md G3 brief step 4, first pass):
   ceiling, storey fallback) + one wall quad per edge; normals face INTO
   the room (the proxy is viewed from inside); labeled sub-meshes
   ``<room_id>/floor|ceiling|wall_NN``. Watertightness is verified per room.
-- Openings (doors/windows), non-planar detail merge (OBJ clip) and Draco
-  compression land in later slices; export is plain GLB for now.
+- Openings: G3 jamb-detected DOORS (--openings, floor-reaching notches)
+  and G6 fusion WINDOWS (--windows, interior holes) are subtracted from
+  wall faces. Windows are assigned to room edges GEOMETRICALLY (proximity
+  only, no plane-id prefilter) because fusion may register a window on a
+  duplicate wall plane the room's edge list never references (LESSONS L3).
+- Non-planar detail merge lives in details.py; Draco compression lands in
+  P4; export is plain GLB for now.
 
 Outputs:
     proxy_shell.glb              all rooms, labeled sub-meshes
@@ -21,7 +26,9 @@ Outputs:
     proxy_review_storey<k>.png   centerline outline vs inset footprint
 
 CLI:
-    python -m vs_pipeline.stages.proxy build --rooms rooms_out/rooms.json -o proxy_out
+    python -m vs_pipeline.stages.proxy build --rooms rooms_out/rooms.json \
+        --openings openings_out/openings.json \
+        --windows fusion_out/openings_fused.json -o proxy_out
 """
 
 from __future__ import annotations
@@ -43,6 +50,13 @@ DEFAULT_WALL_THICKNESS_M = 0.1
 MIN_INSET_AREA_RATIO = 0.4
 #: Adjacent offset edges more parallel than this cannot intersect cleanly.
 PARALLEL_EPS = 1e-3
+#: Kind-aware opening gates.
+DOOR_MIN_WIDTH_M = 0.4
+WINDOW_MIN_WIDTH_M = 0.25
+OPENING_MIN_HEIGHT_M = 0.2
+#: Windows keep a minimal sill above the floor (floor-reaching 'windows'
+#: are glass doors; a 2 cm sill is harmless for occlusion).
+WINDOW_SILL_MIN_M = 0.02
 
 
 def inset_room_polygon(
@@ -98,12 +112,15 @@ def room_shell_mesh(
     poly: Polygon,
     floor_y: float,
     ceiling_y: float,
-    edge_openings: list[list[tuple[float, float, float]]] | None = None,
+    edge_openings: list[list[tuple]] | None = None,
 ) -> dict[str, Any]:
     """Labeled prism parts for one room; normals face INTO the room.
 
-    ``edge_openings[k]`` holds (s0, s1, y_top) door rects for edge k in the
-    edge's own arc-length parameter; they are subtracted from the wall face.
+    ``edge_openings[k]`` holds opening rects for edge k in the edge's own
+    arc-length parameter: (s0, s1, y0, y1) full rects (windows = interior
+    holes, doors = rects whose y0 dips below the floor), or legacy door
+    3-tuples (s0, s1, y_top) which imply y0 = floor - 1 cm. Rects are
+    subtracted from the wall face; earcut triangulates faces with holes.
     """
     import trimesh
 
@@ -141,15 +158,16 @@ def room_shell_mesh(
         )
         if rects:
             face = box(0.0, floor_y, length, ceiling_y)
-            for s0, s1, y_top in rects:
-                face = face.difference(
-                    box(
-                        max(s0, 0.02),
-                        floor_y - 0.01,
-                        min(s1, length - 0.02),
-                        y_top,
-                    )
-                )
+            for rect in rects:
+                if len(rect) == 3:  # legacy door rect (s0, s1, y_top)
+                    s0, s1, y0, y1 = rect[0], rect[1], floor_y - 0.01, rect[2]
+                else:
+                    s0, s1, y0, y1 = rect
+                s0c = max(float(s0), 0.02)
+                s1c = min(float(s1), length - 0.02)
+                if s1c - s0c < 0.05 or float(y1) - float(y0) < 0.05:
+                    continue
+                face = face.difference(box(s0c, float(y0), s1c, float(y1)))
             pieces = [face] if face.geom_type == "Polygon" else list(face.geoms)
             v_parts: list[np.ndarray] = []
             f_parts: list[np.ndarray] = []
@@ -194,64 +212,98 @@ def room_shell_mesh(
 
 
 def _merge_rects(
-    rects: list[tuple[float, float, float]],
-) -> list[tuple[float, float, float]]:
-    """Merge overlapping (s0, s1, y_top) rects (dedup of pair-face doubles)."""
+    rects: list[tuple[float, float, float, float]],
+) -> list[tuple[float, float, float, float]]:
+    """Merge overlapping (s0, s1, y0, y1) rects (dedup of pair-face doubles).
+
+    Two rects merge only when BOTH the s-intervals and the y-intervals
+    overlap (within 5 cm) -- a door and a high window at the same s stay
+    separate.
+    """
     if not rects:
         return []
     ordered = sorted(rects)
     out = [list(ordered[0])]
-    for s0, s1, top in ordered[1:]:
-        if s0 <= out[-1][1] + 0.05:
-            out[-1][1] = max(out[-1][1], s1)
-            out[-1][2] = max(out[-1][2], top)
+    for s0, s1, y0, y1 in ordered[1:]:
+        last = out[-1]
+        s_overlap = s0 <= last[1] + 0.05
+        y_overlap = (y0 <= last[3] + 0.05) and (y1 >= last[2] - 0.05)
+        if s_overlap and y_overlap:
+            last[0] = min(last[0], s0)
+            last[1] = max(last[1], s1)
+            last[2] = min(last[2], y0)
+            last[3] = max(last[3], y1)
         else:
-            out.append([s0, s1, top])
-    return [(a, b, c) for a, b, c in out]
+            out.append([s0, s1, y0, y1])
+    return [tuple(r) for r in out]
 
 
 def _room_edge_openings(
     inset_poly: Polygon,
     edges: list[dict[str, Any]],
     openings_by_plane: dict[str, list[dict[str, Any]]],
+    window_openings: list[dict[str, Any]],
+    floor_y: float,
     ceiling_y: float,
-) -> tuple[list[list[tuple[float, float, float]]], int]:
-    """Assign detected openings to inset-polygon edges as (s0, s1, y_top)."""
+) -> tuple[list[list[tuple[float, float, float, float]]], int]:
+    """Assign openings to inset-polygon edges as (s0, s1, y0, y1) rects.
+
+    Doors: candidates prefiltered by the room's wall plane ids, then the
+    0.3 m proximity gate. Windows: GEOMETRIC assignment only (no plane-id
+    prefilter, LESSONS L3) -- the proximity gate is the guard.
+    """
     ring = [
         np.asarray(p[:2], dtype=np.float64)
         for p in inset_poly.exterior.coords
     ][:-1]
     m = len(ring)
-    out: list[list[tuple[float, float, float]]] = [[] for _ in range(m)]
+    out: list[list[tuple[float, float, float, float]]] = [[] for _ in range(m)]
     cand_ids = {pid for e in edges for pid in e.get("wall_planes", [])}
-    for pid in sorted(cand_ids):
-        for o in openings_by_plane.get(pid, []):
-            corners = np.asarray(o["corners_3d"], dtype=np.float64)
-            pxz = corners[:, [0, 2]]
-            y_top = float(corners[:, 1].max())
-            mid = pxz.mean(axis=0)
-            best_k: int | None = None
-            best_d = 0.3
-            for k in range(m):
-                a2, b2 = ring[k], ring[(k + 1) % m]
-                length = float(np.linalg.norm(b2 - a2))
-                if length < 1e-9:
-                    continue
-                dir2 = (b2 - a2) / length
-                t = float(np.clip((mid - a2) @ dir2, 0.0, length))
-                d = float(np.linalg.norm(a2 + dir2 * t - mid))
-                if d < best_d:
-                    best_d, best_k = d, k
-            if best_k is None:
-                continue
-            a2, b2 = ring[best_k], ring[(best_k + 1) % m]
+    candidates: list[dict[str, Any]] = [
+        o for pid in sorted(cand_ids) for o in openings_by_plane.get(pid, [])
+    ]
+    candidates.extend(window_openings)
+    for o in candidates:
+        kind = str(o.get("kind", "door"))
+        corners = np.asarray(o["corners_3d"], dtype=np.float64)
+        pxz = corners[:, [0, 2]]
+        y_top = float(corners[:, 1].max())
+        y_bot = float(corners[:, 1].min())
+        # Vertical sanity: the rect must intersect this room's height band.
+        if y_bot > ceiling_y - 0.1 or y_top < floor_y + 0.1:
+            continue
+        mid = pxz.mean(axis=0)
+        best_k: int | None = None
+        best_d = 0.3
+        for k in range(m):
+            a2, b2 = ring[k], ring[(k + 1) % m]
             length = float(np.linalg.norm(b2 - a2))
+            if length < 1e-9:
+                continue
             dir2 = (b2 - a2) / length
-            ss = (pxz - a2) @ dir2
-            s0 = float(np.clip(ss.min(), 0.0, length))
-            s1 = float(np.clip(ss.max(), 0.0, length))
-            if s1 - s0 >= 0.4:
-                out[best_k].append((s0, s1, min(y_top, ceiling_y - 0.1)))
+            t = float(np.clip((mid - a2) @ dir2, 0.0, length))
+            d = float(np.linalg.norm(a2 + dir2 * t - mid))
+            if d < best_d:
+                best_d, best_k = d, k
+        if best_k is None:
+            continue
+        a2, b2 = ring[best_k], ring[(best_k + 1) % m]
+        length = float(np.linalg.norm(b2 - a2))
+        dir2 = (b2 - a2) / length
+        ss = (pxz - a2) @ dir2
+        s0 = float(np.clip(ss.min(), 0.0, length))
+        s1 = float(np.clip(ss.max(), 0.0, length))
+        min_w = WINDOW_MIN_WIDTH_M if kind == "window" else DOOR_MIN_WIDTH_M
+        if s1 - s0 < min_w:
+            continue
+        y1 = min(y_top, ceiling_y - (0.05 if kind == "window" else 0.1))
+        if kind == "window":
+            y0 = max(y_bot, floor_y + WINDOW_SILL_MIN_M)
+        else:
+            y0 = floor_y - 0.01
+        if y1 - y0 < OPENING_MIN_HEIGHT_M:
+            continue
+        out[best_k].append((s0, s1, y0, y1))
     merged = [_merge_rects(r) for r in out]
     return merged, sum(len(r) for r in merged)
 
@@ -303,7 +355,10 @@ def _render_review(
 
 
 def build_property(
-    rooms_path: Path, out_dir: Path, openings_path: Path | None = None
+    rooms_path: Path,
+    out_dir: Path,
+    openings_path: Path | None = None,
+    windows_path: Path | None = None,
 ) -> dict[str, Any]:
     import trimesh
 
@@ -313,6 +368,16 @@ def build_property(
         odata = json.loads(openings_path.read_text(encoding="utf-8"))
         for o in odata.get("openings", []):
             openings_by_plane.setdefault(o["plane_id"], []).append(o)
+    window_openings: list[dict[str, Any]] = []
+    if windows_path is not None:
+        wdata = json.loads(windows_path.read_text(encoding="utf-8"))
+        window_openings = [
+            o for o in wdata.get("openings", []) if o.get("kind") == "window"
+        ]
+        print(
+            f"{len(window_openings)} fused window opening(s) loaded "
+            f"(doors in that file are ignored: G3 is the door source)"
+        )
     if data.get("schema_version", 1) < 2:
         raise SystemExit(
             "rooms.json is schema v1 (no per-edge wall data) -- re-run "
@@ -363,11 +428,16 @@ def build_property(
         ):
             inset_poly = orig
             fallback = True
-        edge_rects: list[list[tuple[float, float, float]]] | None = None
+        edge_rects: list[list[tuple[float, float, float, float]]] | None = None
         opening_count = 0
-        if openings_by_plane and not fallback:
+        if (openings_by_plane or window_openings) and not fallback:
             edge_rects, opening_count = _room_edge_openings(
-                inset_poly, edges, openings_by_plane, float(ceiling_y)
+                inset_poly,
+                edges,
+                openings_by_plane,
+                window_openings,
+                float(floor_y),
+                float(ceiling_y),
             )
         parts = room_shell_mesh(
             inset_poly, float(floor_y), float(ceiling_y), edge_rects
@@ -435,7 +505,13 @@ def main(argv: list[str] | None = None) -> int:
     p_build = sub.add_parser("build", help="rooms.json -> proxy_shell.glb")
     p_build.add_argument("--rooms", type=Path, required=True, help="rooms.json")
     p_build.add_argument(
-        "--openings", type=Path, default=None, help="openings.json (door cutouts)"
+        "--openings", type=Path, default=None, help="G3 openings.json (door cutouts)"
+    )
+    p_build.add_argument(
+        "--windows",
+        type=Path,
+        default=None,
+        help="fusion openings_fused.json (window holes; door rows ignored)",
     )
     p_build.add_argument("--output", "-o", type=Path, default=Path("proxy_out"))
     args = parser.parse_args(argv)
@@ -444,7 +520,14 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"rooms file not found: {args.rooms}")
     if args.openings is not None and not args.openings.is_file():
         parser.error(f"openings file not found: {args.openings}")
-    build_property(args.rooms, args.output, openings_path=args.openings)
+    if args.windows is not None and not args.windows.is_file():
+        parser.error(f"windows file not found: {args.windows}")
+    build_property(
+        args.rooms,
+        args.output,
+        openings_path=args.openings,
+        windows_path=args.windows,
+    )
     return 0
 
 
