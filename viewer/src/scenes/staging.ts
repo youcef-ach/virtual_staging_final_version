@@ -39,9 +39,12 @@ const isFloor = (mesh: AbstractMesh): boolean =>
 export class StagingLayer {
   private readonly scene: Scene;
   private readonly occluder: StandardMaterial;
-  private readonly xrayMaterial: StandardMaterial;
-  private readonly proxyMeshes: AbstractMesh[] = [];
+  private readonly xrayShell: StandardMaterial;
+  private readonly xrayDetail: StandardMaterial;
+  private readonly shellMeshes: AbstractMesh[] = [];
+  private readonly detailMeshes: AbstractMesh[] = [];
   private xray = false;
+  private detailsEnabled = true;
   private assetRoot: TransformNode | null = null;
   private userPlaced = false;
 
@@ -59,16 +62,26 @@ export class StagingLayer {
     occluder.backFaceCulling = false; // room shells have inward-facing normals
     this.occluder = occluder;
 
-    // G7.1 X-ray debug material: judge proxy<->photo alignment directly over
+    // G7.1 X-ray debug materials: judge proxy<->photo alignment directly over
     // the photography (LESSONS L5). Forced depth write keeps occlusion live
     // while X-ray is on (alpha-blended meshes skip depth writes by default).
-    const xrayMaterial = new StandardMaterial("proxy-xray", scene);
-    xrayMaterial.emissiveColor = new Color3(0.15, 0.9, 0.4);
-    xrayMaterial.disableLighting = true;
-    xrayMaterial.alpha = 0.3;
-    xrayMaterial.forceDepthWrite = true;
-    xrayMaterial.backFaceCulling = false;
-    this.xrayMaterial = xrayMaterial;
+    // Shells (walls/floors/ceilings) are GREEN; detail proxies (OBJ-clipped
+    // stairs/counters/furniture fragments) are ORANGE so their intentionally
+    // ragged silhouettes are not mistaken for misplaced walls.
+    const xrayShell = new StandardMaterial("proxy-xray-shell", scene);
+    xrayShell.emissiveColor = new Color3(0.15, 0.9, 0.4);
+    xrayShell.disableLighting = true;
+    xrayShell.alpha = 0.3;
+    xrayShell.forceDepthWrite = true;
+    xrayShell.backFaceCulling = false;
+    this.xrayShell = xrayShell;
+    const xrayDetail = new StandardMaterial("proxy-xray-detail", scene);
+    xrayDetail.emissiveColor = new Color3(0.95, 0.55, 0.15);
+    xrayDetail.disableLighting = true;
+    xrayDetail.alpha = 0.3;
+    xrayDetail.forceDepthWrite = true;
+    xrayDetail.backFaceCulling = false;
+    this.xrayDetail = xrayDetail;
 
     // TEMPORARY stand-in lighting -- slice 7.1 only, replaced by IBL in 7.2.
     const hemi = new HemisphericLight("temp-hemi-7_1", new Vector3(0, 1, 0), scene);
@@ -84,11 +97,27 @@ export class StagingLayer {
   /** Toggle the X-ray debug view on the proxy (X key). Returns the new state. */
   toggleXray(): boolean {
     this.xray = !this.xray;
-    const material = this.xray ? this.xrayMaterial : this.occluder;
-    for (const mesh of this.proxyMeshes) {
-      mesh.material = material;
+    for (const mesh of this.shellMeshes) {
+      mesh.material = this.xray ? this.xrayShell : this.occluder;
+    }
+    for (const mesh of this.detailMeshes) {
+      mesh.material = this.xray ? this.xrayDetail : this.occluder;
     }
     return this.xray;
+  }
+
+  /**
+   * Toggle detail proxies (D key): hides them visually AND as occluders --
+   * isolates shell-vs-detail occlusion faults (e.g. OPEN_PROBLEMS #14b,
+   * a detail box enclosing a sweep position). Returns the new state.
+   */
+  toggleDetails(): boolean {
+    this.detailsEnabled = !this.detailsEnabled;
+    for (const mesh of this.detailMeshes) {
+      mesh.setEnabled(this.detailsEnabled);
+    }
+    console.info(`[staging] detail proxies ${this.detailsEnabled ? "ON" : "OFF"}`);
+    return this.detailsEnabled;
   }
 
   /**
@@ -117,16 +146,18 @@ export class StagingLayer {
               `position=${rootNode.position.toString()}`,
           );
         }
+        const isDetails = url.includes("details");
         for (const mesh of result.meshes) {
           mesh.renderingGroupId = GROUP_PROXY;
           if (mesh.getTotalVertices() > 0) {
-            mesh.material = this.xray ? this.xrayMaterial : this.occluder;
-            mesh.isPickable = mesh.name.includes("floor");
+            const xrayMat = isDetails ? this.xrayDetail : this.xrayShell;
+            mesh.material = this.xray ? xrayMat : this.occluder;
+            mesh.isPickable = !isDetails && mesh.name.includes("floor");
             if (mesh.isPickable) {
               floors += 1;
             }
             mesh.freezeWorldMatrix();
-            this.proxyMeshes.push(mesh);
+            (isDetails ? this.detailMeshes : this.shellMeshes).push(mesh);
             count += 1;
           } else {
             mesh.isPickable = false;

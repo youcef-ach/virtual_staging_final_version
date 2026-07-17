@@ -125,6 +125,10 @@ export default function App() {
             case "I":
               viewer.toggleRotationInverse();
               break;
+            case "d":
+            case "D":
+              staging.toggleDetails();
+              break;
             default:
               return;
           }
