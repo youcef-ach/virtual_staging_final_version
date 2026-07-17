@@ -185,6 +185,44 @@ def class_overlay(rgb_u8: np.ndarray, cls: np.ndarray, alpha: float = 0.45) -> n
     return np.clip(mixed, 0, 255).astype(np.uint8)
 
 
+#: Gate-2 operator override (G6 slice 4.4 decision): a hand-corrected class
+#: map dropped next to the generated ones takes precedence over BOTH the
+#: SAM-refined and the raw Mask2Former maps in every consumer. Same
+#: philosophy as the G3 closures.json manual walls -- operator-authored
+#: artifacts instead of interactive tooling before a defect demands it.
+#: Authorable in any image editor: paint 7-class ids (CLASSES indices).
+CLS_OVERRIDE_TEMPLATE = "{face}_cls_override.png"
+
+
+def resolve_class_map(
+    seg_dir: Path, sweep_uuid: str, face: str
+) -> tuple[np.ndarray | None, str | None]:
+    """7-class map for one face with the operator-override precedence.
+
+    Precedence: ``{face}_cls_override.png`` (operator-corrected, Gate-2)
+    > ``{face}_cls_refined.png`` (SAM) > ``{face}_cls.png`` (Mask2Former).
+    Returns (uint8 label map, source filename) or (None, None).
+
+    ALL mask consumers (Gate-1 glass/mirror exclusion, IBL emissive regions,
+    2D->3D fusion) load through this function, so a single hand-authored
+    override propagates everywhere. NOTE: the IBL bake caches per sweep
+    without hashing mask content -- re-bake affected sweeps with ``--force``
+    after authoring an override (OPEN_PROBLEMS #22).
+    """
+    sweep_dir = seg_dir / sweep_uuid
+    for name in (
+        CLS_OVERRIDE_TEMPLATE.format(face=face),
+        f"{face}_cls_refined.png",
+        f"{face}_cls.png",
+    ):
+        path = sweep_dir / name
+        if path.is_file():
+            img = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
+            if img is not None:
+                return img, name
+    return None, None
+
+
 @dataclass
 class SegParams:
     model_name: str = DEFAULT_MODEL

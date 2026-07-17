@@ -320,6 +320,24 @@ merge) instead of raw G2 candidates; finer grid. Windows consumers
 (proxy cutouts #3, highlight reconstruction #17) tolerate current
 quality; revisit before BIM (IfcWindow needs clean rects).
 
+### 22. Gate-2 click-fix mask editor — DEFERRED (decision 2026-07-17)
+Same evidence rule as F6.3 (micro-adjust sliders): build interactive
+correction tooling only when a mask defect actually blocks a consumer.
+Evidence to date is the opposite — slice validation near-perfect, SAM
+tightens boundaries, the mirror acid test passed, and all three consumers
+(Gate-1 #7 with queue 47 → 41, proxy windows #3, guided highlights #17)
+validated on generated masks with zero manual fixes needed.
+Shipped instead: the OPERATOR-OVERRIDE convention (closures.json
+philosophy) — drop a hand-corrected `{face}_cls_override.png` next to the
+generated maps and EVERY consumer picks it up (single loader:
+`segmentation.resolve_class_map`, precedence override > refined > cls).
+Overrides are authorable in any image editor by painting 7-class ids.
+CAVEAT: the IBL bake caches per sweep and does not hash mask content —
+re-bake affected sweeps with `--force` after authoring an override.
+Revisit the editor build when: (a) override authoring happens more than
+rarely, (b) Gate-2 review volume grows on multi-property data, or
+(c) Year-2 room emptying needs pixel-perfect furniture masks at scale.
+
 ---
 
 ## Resolved-but-instructive (for the record)

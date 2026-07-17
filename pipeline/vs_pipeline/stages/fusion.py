@@ -635,13 +635,11 @@ def detect_mirror_mask(
 
 
 def _load_cls(seg_dir: Path, uuid: str, face: str) -> np.ndarray | None:
-    for name in (f"{face}_cls_refined.png", f"{face}_cls.png"):
-        p = seg_dir / uuid / name
-        if p.is_file():
-            img = cv2.imread(str(p), cv2.IMREAD_GRAYSCALE)
-            if img is not None:
-                return img
-    return None
+    """7-class map via the shared loader (operator override > refined > raw)."""
+    from vs_pipeline.stages.segmentation import resolve_class_map
+
+    cls, _src = resolve_class_map(seg_dir, uuid, face)
+    return cls
 
 
 def _load_normal(path: Path) -> np.ndarray | None:

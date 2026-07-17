@@ -316,13 +316,10 @@ def load_exclusion_mask(
     scoring. Returns a bool mask resized to ``shape`` (NEAREST -- label
     images), or None when no segmentation exists for this face.
     """
+    from vs_pipeline.stages.segmentation import resolve_class_map
+
     sweep_dir = seg_dir / sweep_uuid
-    cls_path = sweep_dir / f"{ext_face}_cls_refined.png"
-    if not cls_path.is_file():
-        cls_path = sweep_dir / f"{ext_face}_cls.png"
-    if not cls_path.is_file():
-        return None
-    cls = cv2.imread(str(cls_path), cv2.IMREAD_GRAYSCALE)
+    cls, _src = resolve_class_map(seg_dir, sweep_uuid, ext_face)
     if cls is None:
         return None
     mask = cls == SEG_WINDOW_CLASS_ID

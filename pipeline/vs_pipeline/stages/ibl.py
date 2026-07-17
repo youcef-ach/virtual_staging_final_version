@@ -148,13 +148,10 @@ def load_emissive_mask(seg_dir: Path, sweep_uuid: str, face: str) -> np.ndarray 
     pixel-aligned with the extracted faces. None = no segmentation for this
     face (caller falls back to the blind boost).
     """
+    from vs_pipeline.stages.segmentation import resolve_class_map
+
     sweep_dir = seg_dir / sweep_uuid
-    cls_path = sweep_dir / f"{face}_cls_refined.png"
-    if not cls_path.is_file():
-        cls_path = sweep_dir / f"{face}_cls.png"
-    if not cls_path.is_file():
-        return None
-    cls = cv2.imread(str(cls_path), cv2.IMREAD_GRAYSCALE)
+    cls, _src = resolve_class_map(seg_dir, sweep_uuid, face)
     if cls is None:
         return None
     mask = cls == SEG_WINDOW_CLASS_ID
