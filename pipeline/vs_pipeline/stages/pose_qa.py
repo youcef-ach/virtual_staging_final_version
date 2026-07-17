@@ -19,6 +19,16 @@ Pipeline:
    orientation stand out, drift collapses that gap, and content cancels out).
    A deterministic ~10% of sweeps is always marked for spot-check.
 
+   With ``--seg-dir`` (G6 slice 4.2), window pixels from the 7-class
+   segmentation masks (SAM-refined when present) and mirror pixels from the
+   RAW ADE map are excluded from BOTH edge maps before scoring: glass shows
+   outdoor content and mirrors reflected content that the rendered mesh
+   cannot match -- the dominant false-flag source in the full-run review.
+   Chance correction normalizes by the non-excluded pixel count, and faces
+   whose remaining render edges drop below the informative floor are
+   excluded rather than punished. Sweeps without segmentation masks score
+   exactly as before (graceful fallback).
+
 Face-mapping auto-calibration: extracted faces carry the canonical Set A
 transforms (including the +Z/-Z content swap) plus the viewer-level mirror,
 so extracted face N does not necessarily correspond to rendered face N.
@@ -29,7 +39,7 @@ overlap metric itself is the calibration signal.
 CLI:
     python -m vs_pipeline.stages.pose_qa prepare poses.json -o render_jobs.json
     python -m vs_pipeline.stages.pose_qa score --panos extracted_cubemaps \
-        --renders qa_renders --poses poses.json -o qa_output
+        --renders qa_renders --poses poses.json -o qa_output [--seg-dir seg_out]
 """
 
 from __future__ import annotations
@@ -37,7 +47,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import cv2
@@ -46,7 +56,7 @@ import numpy as np
 from vs_pipeline.coordinates import convert_pose_yup_to_zup
 from vs_pipeline.stages.pose import SweepPose, read_poses_json
 
-QA_SCHEMA_VERSION = 4
+QA_SCHEMA_VERSION = 5
 #: Gross-failure floor for the chance-corrected sweep score: a misregistered
 #: sweep renders wrong geometry, so its normalized score collapses toward 0.
 DEFAULT_THRESHOLD = 0.20
@@ -65,6 +75,17 @@ PANO_MAX_DENSITY = 0.97
 #: overlap minus the best wrong orientation's) below this value flags the
 #: sweep. Correct pose -> clear positive margin; drift -> margin collapses.
 MARGIN_THRESHOLD = 0.03
+
+#: G6 slice 4.2 -- Gate-1 glass/mirror exclusion. 7-class id for 'window'
+#: (index into vs_pipeline.stages.segmentation.CLASSES; cross-checked by a
+#: unit test instead of an import, keeping pose-QA decoupled from the
+#: segmentation module) and the raw ADE20K label id for 'mirror;looking
+#: glass' (the 7-class map deliberately sends mirror to 'other', so mirrors
+#: are only reachable through the RAW map). Known limitation (OPEN_PROBLEMS
+#: #2): REAL mirror surfaces are usually labeled 'wall' by Mask2Former, so
+#: mirror exclusion via the raw map is best-effort.
+SEG_WINDOW_CLASS_ID = 4
+ADE_MIRROR_LABEL_ID = 27
 
 FACE_NAMES = ("px", "nx", "py", "ny", "pz", "nz")
 
@@ -115,6 +136,8 @@ class SweepQAResult:
     flagged: bool
     spot_check: bool
     uninformative_faces: list[str]
+    #: Per-face fraction of pixels excluded as glass/mirror (seg-dir runs only).
+    face_excluded: dict[str, float] = field(default_factory=dict)
 
 
 def apply_orientation(image: np.ndarray, op: str) -> np.ndarray:
@@ -239,11 +262,25 @@ def _overlap(pano_dilated: np.ndarray, render_edges: np.ndarray) -> float:
     return hits / total
 
 
-def _mask_density(mask: np.ndarray) -> float:
-    return float(np.count_nonzero(mask)) / float(mask.size)
+def _mask_density(mask: np.ndarray, valid_px: int | None = None) -> float:
+    """Fraction of (valid) pixels covered by the mask.
+
+    ``valid_px`` restricts the denominator to non-excluded pixels when a
+    glass/mirror exclusion is active (the mask itself must already be zeroed
+    inside the excluded region). A zero/negative valid area reads as fully
+    saturated (density 1.0 -> no measurable signal).
+    """
+    total = float(valid_px) if valid_px is not None else float(mask.size)
+    if total <= 0:
+        return 1.0
+    return float(np.count_nonzero(mask)) / total
 
 
-def _normalized_overlap(pano_dilated: np.ndarray, render_edges: np.ndarray) -> float:
+def _normalized_overlap(
+    pano_dilated: np.ndarray,
+    render_edges: np.ndarray,
+    valid_px: int | None = None,
+) -> float:
     """Chance-corrected overlap: (raw - density) / (1 - density).
 
     ``density`` is the fraction of the image covered by the dilated pano edge
@@ -251,15 +288,53 @@ def _normalized_overlap(pano_dilated: np.ndarray, render_edges: np.ndarray) -> f
     The normalized score measures how much better than chance the alignment
     is, making texture-dense and texture-sparse faces comparable. A perfect
     alignment still scores 1.0; a chance-level alignment scores ~0.0; worse
-    than chance is negative.
+    than chance is negative. With an active glass/mirror exclusion both edge
+    maps are zeroed inside the excluded region and ``valid_px`` carries the
+    non-excluded pixel count, so chance is computed over scoreable pixels.
     """
     if int(np.count_nonzero(render_edges)) == 0:
         return 0.0  # no rendered edges -> no signal, not worse-than-chance
-    density = _mask_density(pano_dilated)
+    density = _mask_density(pano_dilated, valid_px)
     if density >= 1.0:
         return 0.0
     raw = _overlap(pano_dilated, render_edges)
     return (raw - density) / (1.0 - density)
+
+
+def load_exclusion_mask(
+    seg_dir: Path, sweep_uuid: str, ext_face: str, shape: tuple[int, int]
+) -> np.ndarray | None:
+    """Gate-1 glass/mirror exclusion mask for one extracted face (or None).
+
+    Reads the G6 segmentation outputs, which are stored-layout and therefore
+    pixel-aligned with the extracted pano faces (the upright fix's
+    guarantee): window pixels from the 7-class map (SAM-refined variant
+    preferred) UNION mirror pixels from the RAW ADE map (the 7-class map
+    deliberately sends mirror to 'other'). Both regions carry photographic
+    content the mesh render cannot match (outdoor scenery through glass,
+    reflected room content), so they are removed from BOTH edge maps before
+    scoring. Returns a bool mask resized to ``shape`` (NEAREST -- label
+    images), or None when no segmentation exists for this face.
+    """
+    sweep_dir = seg_dir / sweep_uuid
+    cls_path = sweep_dir / f"{ext_face}_cls_refined.png"
+    if not cls_path.is_file():
+        cls_path = sweep_dir / f"{ext_face}_cls.png"
+    if not cls_path.is_file():
+        return None
+    cls = cv2.imread(str(cls_path), cv2.IMREAD_GRAYSCALE)
+    if cls is None:
+        return None
+    mask = cls == SEG_WINDOW_CLASS_ID
+    ade = cv2.imread(str(sweep_dir / f"{ext_face}_ade.png"), cv2.IMREAD_GRAYSCALE)
+    if ade is not None and ade.shape == cls.shape:
+        mask |= ade == ADE_MIRROR_LABEL_ID
+    mask_u8 = mask.astype(np.uint8)
+    if mask_u8.shape != tuple(shape):
+        mask_u8 = cv2.resize(
+            mask_u8, (int(shape[1]), int(shape[0])), interpolation=cv2.INTER_NEAREST
+        )
+    return mask_u8.astype(bool)
 
 
 def edge_overlap_score(
@@ -358,10 +433,15 @@ def calibrate_face_mapping(
 
 
 def _write_composite_grid(
-    faces: list[tuple[str, float, np.ndarray, np.ndarray, str]], out_path: Path
+    faces: list[tuple[str, float, np.ndarray, np.ndarray, str]],
+    out_path: Path,
+    exclusions: dict[str, np.ndarray] | None = None,
 ) -> None:
     """Stacked review image, one row per face:
     pano | rendered OBJ view (oriented normalized depth) | pano + red render edges.
+
+    Excluded glass/mirror regions (seg-dir runs) are tinted yellow in the
+    overlay column: those pixels did not participate in the score.
     """
     rows: list[np.ndarray] = []
     for face_name, score, pano_gray, render_gray, orientation in faces:
@@ -375,6 +455,14 @@ def _write_composite_grid(
         oriented_render = np.ascontiguousarray(apply_orientation(render_gray, orientation))
         render_view = cv2.cvtColor(oriented_render, cv2.COLOR_GRAY2BGR)
         overlay = color.copy()
+        excl = exclusions.get(face_name) if exclusions else None
+        if excl is not None and excl.shape == overlay.shape[:2]:
+            tinted = overlay[excl].astype(np.float32)
+            overlay[excl] = (
+                0.55 * tinted + 0.45 * np.array([0.0, 255.0, 255.0], dtype=np.float32)
+            ).astype(np.uint8)
+            render_edges = render_edges.copy()
+            render_edges[excl] = 0
         overlay[render_edges > 0] = (0, 0, 255)
         row = np.hstack([color, render_view, overlay])
         cv2.putText(
@@ -402,6 +490,7 @@ def score_property(
     threshold: float = DEFAULT_THRESHOLD,
     calibration_samples: int = 5,
     calibration_path: Path | None = None,
+    seg_dir: Path | None = None,
 ) -> list[SweepQAResult]:
     """Score every rendered sweep; write pose_qa.json + review composites."""
     sweeps = read_poses_json(poses_path)
@@ -432,12 +521,17 @@ def score_property(
             )
             print(f"calibration locked -> {calibration_path}")
 
+    if seg_dir is not None:
+        print(f"glass/mirror exclusion active (seg masks: {seg_dir})")
+
     results: list[SweepQAResult] = []
     composites_dir = output_dir / "composites"
     for sweep in rendered:
         face_scores: dict[str, float] = {}
         raw_face_scores: dict[str, float] = {}
         face_margins: dict[str, float] = {}
+        face_excluded: dict[str, float] = {}
+        face_exclusions: dict[str, np.ndarray] = {}
         uninformative: list[str] = []
         faces_gray: dict[str, tuple[np.ndarray, np.ndarray, str]] = {}
         for ext_face in FACE_NAMES:
@@ -451,22 +545,45 @@ def score_property(
             if pano is None or render is None:
                 continue
             render_edges = _render_edges(render, op)
+            exclusion: np.ndarray | None = None
+            valid_px: int | None = None
+            if seg_dir is not None:
+                exclusion = load_exclusion_mask(
+                    seg_dir, sweep.sweep_uuid, ext_face, render_edges.shape
+                )
+                if exclusion is not None and not np.any(exclusion):
+                    exclusion = None  # mask exists but excludes nothing
+            if exclusion is not None:
+                excluded_count = int(np.count_nonzero(exclusion))
+                face_excluded[ext_face] = round(
+                    excluded_count / float(exclusion.size), 4
+                )
+                face_exclusions[ext_face] = exclusion
+                valid_px = int(exclusion.size) - excluded_count
+                render_edges[exclusion] = 0  # Canny output: fresh array, safe to mutate
             if int(np.count_nonzero(render_edges)) < MIN_RENDER_EDGE_PIXELS:
                 uninformative.append(ext_face)  # no signal: exclude, don't punish
                 continue
             pano_dilated = _pano_edges_dilated(pano, render_edges.shape)
-            if _mask_density(pano_dilated) > PANO_MAX_DENSITY:
+            if exclusion is not None:
+                pano_dilated[exclusion] = 0  # dilate output: fresh array
+            if _mask_density(pano_dilated, valid_px) > PANO_MAX_DENSITY:
                 uninformative.append(ext_face)  # saturated pano: no measurable signal
                 continue
-            locked_norm = _normalized_overlap(pano_dilated, render_edges)
+            locked_norm = _normalized_overlap(pano_dilated, render_edges, valid_px)
             face_scores[ext_face] = locked_norm
             raw_face_scores[ext_face] = _overlap(pano_dilated, render_edges)
-            best_other = max(
-                _normalized_overlap(pano_dilated, _render_edges(render, other_op))
-                for other_op in ORIENTATION_OPS
-                if other_op != op
-            )
-            face_margins[ext_face] = locked_norm - best_other
+            other_norms: list[float] = []
+            for other_op in ORIENTATION_OPS:
+                if other_op == op:
+                    continue
+                other_edges = _render_edges(render, other_op)
+                if exclusion is not None:
+                    other_edges[exclusion] = 0
+                other_norms.append(
+                    _normalized_overlap(pano_dilated, other_edges, valid_px)
+                )
+            face_margins[ext_face] = locked_norm - max(other_norms)
             faces_gray[ext_face] = (pano, render, op)
         informative = len(face_scores)
         score = (
@@ -502,6 +619,7 @@ def score_property(
                 flagged=flagged,
                 spot_check=spot,
                 uninformative_faces=uninformative,
+                face_excluded=face_excluded,
             )
         )
         if (flagged or spot) and face_scores:
@@ -511,7 +629,9 @@ def score_property(
                 if face in face_scores
             ]
             _write_composite_grid(
-                grid, composites_dir / f"{sweep.index:03d}_{sweep.sweep_uuid}.jpg"
+                grid,
+                composites_dir / f"{sweep.index:03d}_{sweep.sweep_uuid}.jpg",
+                exclusions=face_exclusions or None,
             )
 
     payload = {
@@ -520,6 +640,8 @@ def score_property(
         "margin_threshold": MARGIN_THRESHOLD,
         "spot_check_rate": SPOT_CHECK_RATE,
         "calibration": calibration,
+        "seg_dir": str(seg_dir) if seg_dir is not None else None,
+        "seg_excluded_sweep_count": sum(1 for r in results if r.face_excluded),
         "sweep_count": len(results),
         "flagged_count": sum(1 for r in results if r.flagged),
         "spot_check_count": sum(1 for r in results if r.spot_check),
@@ -534,6 +656,7 @@ def score_property(
                 "face_margins": r.face_margins,
                 "flag_reasons": r.flag_reasons,
                 "uninformative_faces": r.uninformative_faces,
+                "face_excluded": r.face_excluded,
                 "flagged": r.flagged,
                 "spot_check": r.spot_check,
             }
@@ -661,6 +784,14 @@ def main(argv: list[str] | None = None) -> int:
         help="calibration file (default: {output}/calibration.json); loaded if present, "
         "otherwise computed and persisted",
     )
+    p_score.add_argument(
+        "--seg-dir",
+        type=Path,
+        default=None,
+        help="G6 segmentation output dir (seg_out): exclude window pixels "
+        "(7-class masks, SAM-refined preferred) + raw-ADE mirror pixels from "
+        "scoring; sweeps without masks score exactly as before",
+    )
 
     args = parser.parse_args(argv)
 
@@ -695,6 +826,7 @@ def main(argv: list[str] | None = None) -> int:
         threshold=args.threshold,
         calibration_samples=args.calibration_samples,
         calibration_path=args.calibration or (args.output / "calibration.json"),
+        seg_dir=args.seg_dir,
     )
     scored = [r for r in results if r.score is not None]
     flagged = [r for r in results if r.flagged]
@@ -705,6 +837,12 @@ def main(argv: list[str] | None = None) -> int:
         margins = [r.margin for r in scored if r.margin is not None]
         if margins:
             print(f"mean orientation margin {float(np.mean(margins)):.3f}")
+    if args.seg_dir is not None:
+        masked = sum(1 for r in results if r.face_excluded)
+        print(
+            f"glass/mirror exclusion: {masked}/{len(results)} sweep(s) had "
+            f"masked pixels (seg: {args.seg_dir})"
+        )
     print(
         f"flagged (score < {args.threshold} or margin < {MARGIN_THRESHOLD}): "
         f"{len(flagged)}   spot-check: {len(spot)}"
@@ -715,6 +853,9 @@ def main(argv: list[str] | None = None) -> int:
         extra = f"  (worst: {detail})" if detail else ""
         if r.uninformative_faces:
             extra += f"  [no-signal: {','.join(r.uninformative_faces)}]"
+        if r.face_excluded:
+            top = max(r.face_excluded.values())
+            extra += f"  [excl max {top:.0%}]"
         score_str = f"{r.score:.3f}" if r.score is not None else "n/a"
         margin_str = f"{r.margin:.3f}" if r.margin is not None else "n/a"
         print(

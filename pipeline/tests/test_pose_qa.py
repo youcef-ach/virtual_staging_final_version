@@ -1,18 +1,23 @@
 import json
 from pathlib import Path
 
+import cv2
 import numpy as np
 
 from vs_pipeline.coordinates import convert_pose_zup_to_yup
 from vs_pipeline.stages.pose import SweepPose, write_poses_json
 from vs_pipeline.stages.pose_qa import (
+    ADE_MIRROR_LABEL_ID,
     FACE_NAMES,
     ORIENTATION_OPS,
+    SEG_WINDOW_CLASS_ID,
     _bijective_assignment,
+    _normalized_overlap,
     apply_orientation,
     edge_overlap_score,
     face_camera_matrix,
     is_spot_check,
+    load_exclusion_mask,
     prepare_render_jobs,
 )
 
@@ -125,3 +130,67 @@ def test_prepare_render_jobs_round_trip(tmp_path: Path) -> None:
     # Camera position must equal the sweep position in the MATTERPORT frame.
     matrix = np.asarray(faces["px"])
     np.testing.assert_allclose(matrix[:3, 3], [1.0, 2.0, 3.0], atol=1e-9)
+
+
+# --------------------------------------------- G6 slice 4.2: glass/mirror exclusion
+
+
+def test_load_exclusion_mask_prefers_refined_and_unions_mirror(tmp_path: Path) -> None:
+    sweep_dir = tmp_path / "seg" / "uuid-1"
+    sweep_dir.mkdir(parents=True)
+    cls = np.zeros((8, 8), dtype=np.uint8)
+    cls[0:2, :] = SEG_WINDOW_CLASS_ID  # coarse-only window rows (must be superseded)
+    refined = np.zeros((8, 8), dtype=np.uint8)
+    refined[6:8, :] = SEG_WINDOW_CLASS_ID  # SAM-refined window rows
+    ade = np.zeros((8, 8), dtype=np.uint8)
+    ade[3, 3] = ADE_MIRROR_LABEL_ID  # mirror only visible in the RAW map
+    cv2.imwrite(str(sweep_dir / "px_cls.png"), cls)
+    cv2.imwrite(str(sweep_dir / "px_cls_refined.png"), refined)
+    cv2.imwrite(str(sweep_dir / "px_ade.png"), ade)
+
+    mask = load_exclusion_mask(tmp_path / "seg", "uuid-1", "px", (16, 16))
+    assert mask is not None
+    assert mask.dtype == bool and mask.shape == (16, 16)
+    assert mask[15, 0]  # refined window region (NEAREST-upscaled)
+    assert not mask[0, 0]  # coarse-only region ignored: refined map preferred
+    assert mask[6, 6]  # mirror pixel from the RAW ADE map, unioned in
+
+    # No segmentation for this face -> None (graceful legacy fallback).
+    assert load_exclusion_mask(tmp_path / "seg", "uuid-1", "py", (16, 16)) is None
+    assert load_exclusion_mask(tmp_path / "seg", "uuid-2", "px", (16, 16)) is None
+
+
+def test_exclusion_valid_px_restores_signal_outside_glass() -> None:
+    # Glass half (cols < 32): dense pano "content" edges at even columns, render
+    # junk at odd columns (all misses). Outside: one clean structural edge where
+    # the render lands exactly.
+    pano_dilated = np.zeros((64, 64), dtype=np.uint8)
+    pano_dilated[:, 0:32:2] = 255  # glass content edges
+    pano_dilated[:, 48] = 255  # real structural edge
+    render_edges = np.zeros((64, 64), dtype=np.uint8)
+    render_edges[:, 1:32:2] = 255  # junk inside the glass (misses the pano edges)
+    render_edges[:, 48] = 255  # render hits the structure
+
+    unmasked = _normalized_overlap(pano_dilated, render_edges)
+
+    exclusion = np.zeros((64, 64), dtype=bool)
+    exclusion[:, :32] = True
+    pano_masked = pano_dilated.copy()
+    pano_masked[exclusion] = 0
+    render_masked = render_edges.copy()
+    render_masked[exclusion] = 0
+    valid_px = int(exclusion.size - np.count_nonzero(exclusion))
+    masked = _normalized_overlap(pano_masked, render_masked, valid_px)
+
+    # Removing the glass noise turns a chance-level face into a near-perfect one.
+    assert masked > unmasked
+    assert masked > 0.9
+    assert unmasked < 0.5
+
+
+def test_exclusion_window_id_matches_segmentation_contract() -> None:
+    # pose_qa deliberately does not import the segmentation module at runtime;
+    # this test pins the id contract so drift is impossible to miss.
+    from vs_pipeline.stages.segmentation import CLASS_IDS
+
+    assert SEG_WINDOW_CLASS_ID == CLASS_IDS["window"]
