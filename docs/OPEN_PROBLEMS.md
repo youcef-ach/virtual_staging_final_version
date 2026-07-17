@@ -288,6 +288,22 @@ Causes QA render softness and the pose-QA detection floor; OBJ is only a
 QA/dollhouse/morphing asset (E57 is metric truth), but if a higher-fidelity
 mesh source appears, several limits above relax.
 
+### 21. G6 fusion opening-rect quality — TUNE (logged 2026-07-17)
+The reprojection review proves rects land on real windows/doors, but
+quality is rough: some openings covered only partially, some split into
+multiple rects, all at 5 cm grid resolution. Root causes: (a) evidence
+SPLITTING across G2's under-merged duplicate coplanar wall planes — each
+duplicate accumulates part of the mask pixels and extracts its own
+(partial) rect; direct descendant of #1, would largely disappear with a
+cleaner G2 merge; (b) per-component acceptance on sparse occupancy
+(MIN_PIXELS_PER_CELL, morphology) fragments thin evidence; (c) GRID_M
+0.05 caps corner precision. Improvement paths, deferred: merge rects
+across near-coplanar planes at finalize time (union in world space);
+accumulate evidence on CANONICAL merged planes (rooms.py-style collinear
+merge) instead of raw G2 candidates; finer grid. Windows consumers
+(proxy cutouts #3, highlight reconstruction #17) tolerate current
+quality; revisit before BIM (IfcWindow needs clean rects).
+
 ---
 
 ## Resolved-but-instructive (for the record)

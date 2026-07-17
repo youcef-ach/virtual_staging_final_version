@@ -240,3 +240,64 @@ def test_ray_plane_lift_door_hole_occluder_nearest():
     )
     assert bool((widx3 == 1).all())
     assert np.allclose(pts3[:, 1], -3.0, atol=1e-9)
+
+
+def test_decode_normals_auto_detection():
+    """Encoded ((n+1)/2 in 0..1) maps decode; raw signed maps pass through --
+    including the tricky all-positive raw case (a face seeing one +X wall)."""
+    from vs_pipeline.stages.fusion import _decode_normals
+
+    rng = np.random.default_rng(11)
+    raw = rng.normal(size=(16, 16, 3))
+    raw /= np.linalg.norm(raw, axis=-1, keepdims=True)  # unit signed normals
+    out, decoded = _decode_normals(raw)
+    assert not decoded and np.allclose(out, raw)
+    encoded = (raw + 1.0) / 2.0  # 0..1, lengths spread away from 1
+    out2, decoded2 = _decode_normals(encoded)
+    assert decoded2 and np.allclose(out2, raw, atol=1e-12)
+    # All-(1,0,0) RAW face: no negatives but unit lengths -> must NOT decode.
+    flat = np.zeros((8, 8, 3))
+    flat[..., 0] = 1.0
+    out3, decoded3 = _decode_normals(flat)
+    assert not decoded3 and np.allclose(out3, flat)
+    # The encoded ceiling case that fooled the verticality gate:
+    # (0,0,-1) stored as (0.5, 0.5, 0) -> decode restores the true normal.
+    ceil = np.zeros((8, 8, 3))
+    ceil[..., 0] = 0.5
+    ceil[..., 1] = 0.5
+    out4, decoded4 = _decode_normals(ceil)
+    assert decoded4 and np.allclose(out4[..., 2], -1.0)
+
+
+def test_match_doors_geometric_plane_agnostic():
+    """Same physical door on DIFFERENT plane_ids (G2 duplicate walls) must
+    match; a door elsewhere must not."""
+    from vs_pipeline.stages.fusion import match_doors
+
+    def _door(plane_id, x, ylo, yhi, z):
+        return {
+            "plane_id": plane_id,
+            "kind": "door",
+            "corners_3d": [
+                [x - 0.4, ylo, z],
+                [x + 0.4, ylo, z],
+                [x + 0.4, yhi, z],
+                [x - 0.4, yhi, z],
+            ],
+        }
+
+    # Fused door on the duplicate plane 'wall_b', slightly offset, covering
+    # only the visible leaf (0.3-2.0 m); G3 door on 'wall_a' reaches the floor.
+    fused = [_door("wall_b", 2.1, 0.3, 2.0, 0.05)]
+    g3 = [_door("wall_a", 2.0, 0.0, 2.1, 0.0), _door("wall_c", 9.0, 0.0, 2.1, 0.0)]
+    res = match_doors(fused, g3)
+    assert res == {
+        "fused_doors": 1,
+        "g3_doors_on_property": 2,
+        "fused_matched": 1,
+        "g3_recovered": 1,
+    }
+    # Beyond the horizontal gate -> no match.
+    far = [_door("wall_b", 4.0, 0.3, 2.0, 0.05)]
+    res2 = match_doors(far, g3)
+    assert res2["fused_matched"] == 0 and res2["g3_recovered"] == 0
