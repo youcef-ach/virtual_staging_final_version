@@ -24,16 +24,23 @@ not true scene depth. Fusion direction therefore depends on class:
    agrees with a wall plane => mirror. v2 NORMAL GATE: the rendered proxy
    normal must belong to a VERTICAL surface ALIGNED with the assigned wall
    plane -- kills wall-top ceiling strips (normal down) and horizontal rims
-   (normal up), the dominant 152/157 false positives. Residual FP mode:
-   furniture tight against a wall WITHOUT a detail proxy. Real mirrors
-   labeled `wall` by Mask2Former are structurally MISSED (never enter the
-   candidate set) -- needs raw-ADE reflected-content evidence (next
-   iteration).
+   (normal up), the dominant 152/157 false positives. Normal maps are
+   AUTO-DECODED when stored encoded ((n+1)/2 in 0..1 -- common through
+   image pipelines); a one-time diagnostic line reports the verdict.
+   Residual FP mode: furniture tight against a wall WITHOUT a detail
+   proxy. Real mirrors labeled `wall` by Mask2Former are structurally
+   MISSED (never enter the candidate set) -- needs raw-ADE
+   reflected-content evidence (next iteration).
 
 Review: accepted opening rects are REPROJECTED onto the pano faces
 (occlusion-gated; the F5 ghosting-proof philosophy -- evidence drawn over
 the photograph). The per-plane (u, v) grids remain as secondary evidence
 maps.
+
+Door cross-check vs G3 is GEOMETRIC (match_doors): with G2's under-merged
+duplicate wall candidates, the fused door routinely lands on a
+duplicate/pair-face plane with a DIFFERENT id than the one G3 notched --
+plane_id equality measured that, not geometry.
 
 Pixel alignment: masks are stored in the canonical (stored) face layout,
 pixel-aligned with the extracted faces. The LOCKED F5 calibration maps each
@@ -413,6 +420,53 @@ def opening_dict(
     }
 
 
+def match_doors(
+    fused_doors: list[dict[str, Any]],
+    g3_doors: list[dict[str, Any]],
+    max_horiz_dist_m: float = DOOR_MATCH_HORIZ_M,
+    min_v_overlap_m: float = DOOR_MATCH_V_OVERLAP_M,
+) -> dict[str, int]:
+    """GEOMETRIC door cross-check (plane_id-agnostic).
+
+    G2's under-merged duplicate wall candidates mean the fused door
+    routinely lands on a duplicate/pair-face plane with a DIFFERENT id
+    than the one G3 notched -- plane_id equality measured id luck, not
+    geometry. Here two door rects match when their world-space centers are
+    within ``max_horiz_dist_m`` horizontally (XZ) AND their vertical (Y)
+    intervals overlap by >= ``min_v_overlap_m`` (G3 doors reach the floor
+    while fused masks may only cover the visible leaf, so vertical extents
+    legitimately differ). Reports both directions.
+    """
+
+    def _geom(o: dict[str, Any]) -> tuple[np.ndarray, float, float]:
+        corners = np.asarray(o["corners_3d"], dtype=np.float64)
+        return (
+            corners.mean(axis=0),
+            float(corners[:, 1].min()),
+            float(corners[:, 1].max()),
+        )
+
+    fused_matched = 0
+    g3_hit: set[int] = set()
+    for o in fused_doors:
+        c, ylo, yhi = _geom(o)
+        hit_any = False
+        for gi, g in enumerate(g3_doors):
+            gc, gylo, gyhi = _geom(g)
+            horiz = float(np.hypot(c[0] - gc[0], c[2] - gc[2]))
+            v_overlap = min(yhi, gyhi) - max(ylo, gylo)
+            if horiz <= max_horiz_dist_m and v_overlap >= min_v_overlap_m:
+                hit_any = True
+                g3_hit.add(gi)
+        fused_matched += int(hit_any)
+    return {
+        "fused_doors": len(fused_doors),
+        "g3_doors_on_property": len(g3_doors),
+        "fused_matched": fused_matched,
+        "g3_recovered": len(g3_hit),
+    }
+
+
 # ------------------------------------------------------------------ furniture voting
 
 
@@ -518,6 +572,7 @@ def detect_mirror_mask(
     walls: list[WallPlane],
     min_area_px: int,
     normals_yup: np.ndarray | None = None,
+    stats_out: dict[str, int] | None = None,
 ) -> np.ndarray:
     """Room-content pixels whose proxy hit sits ON a wall plane => mirror.
 
@@ -529,13 +584,21 @@ def detect_mirror_mask(
     points down) and horizontal rims like bathtub edges / toilet bases
     (normal points up). Wall-tight furniture without a detail proxy remains
     the known residual false-positive mode.
+
+    ``stats_out`` (optional) receives cand_px / on_wall_px_v1 / passed_px
+    so the caller can report exactly what the gate kills.
     """
     out = np.zeros(cand_mask.shape, dtype=bool)
     if not bool(cand_mask.any()) or not walls:
+        if stats_out is not None:
+            stats_out.update(
+                cand_px=int(cand_mask.sum()), on_wall_px_v1=0, passed_px=0
+            )
         return out
     pts = world_yup[cand_mask]
     best, _ = assign_to_walls(pts, walls, MIRROR_WALL_DIST_M)
     on_wall = best >= 0
+    v1_count = int(on_wall.sum())
     if normals_yup is not None:
         nrm = np.asarray(normals_yup[cand_mask], dtype=np.float64)
         length = np.linalg.norm(nrm, axis=-1)
@@ -553,6 +616,12 @@ def detect_mirror_mask(
             >= MIRROR_NORMAL_ALIGN_MIN
         )
         on_wall = on_wall & ok_len & vertical & aligned
+    if stats_out is not None:
+        stats_out.update(
+            cand_px=int(cand_mask.sum()),
+            on_wall_px_v1=v1_count,
+            passed_px=int(on_wall.sum()),
+        )
     flat = np.zeros(cand_mask.shape, dtype=np.uint8)
     flat[cand_mask] = on_wall.astype(np.uint8)
     n, labels, stats, _ = cv2.connectedComponentsWithStats(flat, connectivity=8)
@@ -602,6 +671,30 @@ def _load_normal(path: Path) -> np.ndarray | None:
     if img is None or img.ndim != 3 or img.shape[2] < 3:
         return None
     return np.asarray(img[..., :3], dtype=np.float64)
+
+
+def _decode_normals(arr: np.ndarray) -> tuple[np.ndarray, bool]:
+    """Auto-detect ENCODED normal maps ((n+1)/2 in 0..1) and decode to signed.
+
+    Raw world-space normals contain negative components and/or have ~unit
+    lengths; encoded maps are non-negative with lengths spread away from 1
+    (an encoded straight-down normal (0,0,-1) becomes (0.5, 0.5, 0), length
+    0.707 -- which is exactly how a ceiling can pass a verticality gate).
+    Applies n = 2v - 1 when encoding is detected. Returns (array, decoded).
+    """
+    finite = np.isfinite(arr).all(axis=-1)
+    if not bool(finite.any()):
+        return arr, False
+    vals = arr[finite]
+    lengths = np.linalg.norm(vals, axis=-1)
+    nonzero = lengths > 1e-6
+    if not bool(nonzero.any()):
+        return arr, False
+    has_negative = bool((vals < -0.05).any())
+    med_len = float(np.median(lengths[nonzero]))
+    if has_negative or 0.9 <= med_len <= 1.1:
+        return arr, False
+    return arr * 2.0 - 1.0, True
 
 
 def _grid_review(acc: PlaneAccumulator, rects_by_kind: dict[str, list], path: Path) -> None:
@@ -759,6 +852,8 @@ def run(
     box_views = np.zeros(len(boxes), dtype=np.int64)
     mirror_stats: list[dict[str, Any]] = []
     normals_missing = 0
+    normals_decoded = 0
+    normal_diag_printed = False
     out_dir.mkdir(parents=True, exist_ok=True)
     mirror_dir = out_dir / "mirror_masks"
     review_dir = out_dir / "review"
@@ -775,6 +870,8 @@ def run(
             continue
         sweep_mirror: dict[str, float] = {}
         faces_done = 0
+        gate_v1_px = 0
+        gate_passed_px = 0
         for face in FACE_NAMES:
             m = mapping.get(face)
             if not m:
@@ -805,13 +902,32 @@ def run(
                 renders_dir / uuid / f"{render_face}_normal.exr"
             )
             if nrm_render is not None and nrm_render.shape[0] == size:
+                if not normal_diag_printed:
+                    fin = nrm_render[np.isfinite(nrm_render).all(axis=-1)]
+                    if fin.size:
+                        lens = np.linalg.norm(fin, axis=-1)
+                        lens = lens[lens > 1e-6]
+                        med = float(np.median(lens)) if lens.size else 0.0
+                        print(
+                            f"normal-map diagnostic ({uuid}/{render_face}): "
+                            f"min {fin.min():+.3f} max {fin.max():+.3f} "
+                            f"median|n| {med:.3f}"
+                        )
+                    normal_diag_printed = True
+                nrm_render, decoded = _decode_normals(nrm_render)
+                normals_decoded += int(decoded)
                 nrm_ext = np.ascontiguousarray(apply_orientation(nrm_render, op))
                 normals_yup = zup_to_yup_points(nrm_ext)
             else:
                 normals_missing += 1
             cand = np.isin(cls_r, cand_ids) & valid
             min_area = int(MIRROR_MIN_AREA_FRAC * size * size)
-            mirror = detect_mirror_mask(cand, world, walls, min_area, normals_yup)
+            gate_stats: dict[str, int] = {}
+            mirror = detect_mirror_mask(
+                cand, world, walls, min_area, normals_yup, gate_stats
+            )
+            gate_v1_px += gate_stats.get("on_wall_px_v1", 0)
+            gate_passed_px += gate_stats.get("passed_px", 0)
             frac = float(mirror.mean())
             sweep_mirror[face] = frac
             if bool(mirror.any()):
@@ -859,12 +975,18 @@ def run(
         )
         print(
             f"[{idx:03d}] {uuid}: {faces_done} face(s) fused, "
-            f"mirror on {len(mirror_faces)} face(s)"
+            f"mirror on {len(mirror_faces)} face(s) "
+            f"(gate: {gate_v1_px} on-wall px -> {gate_passed_px} passed)"
         )
     if normals_missing:
         print(
             f"WARNING: {normals_missing} face(s) had no readable normal map -> "
             "mirror normal gate skipped there (expect more false positives)"
+        )
+    if normals_decoded:
+        print(
+            f"normal maps auto-decoded ((n+1)/2 -> signed) on "
+            f"{normals_decoded} face(s)"
         )
 
     # --- finalize openings
@@ -898,31 +1020,13 @@ def run(
         )
         print(f"opening reprojection review: {n_imgs} image(s) -> {review_dir}")
 
-    # --- optional cross-check vs G3 jamb-detected doors
+    # --- optional cross-check vs G3 jamb-detected doors (GEOMETRIC)
     door_matches = None
     if g3_openings_path is not None and g3_openings_path.is_file():
         g3 = json.loads(g3_openings_path.read_text(encoding="utf-8"))
         g3_doors = [o for o in g3.get("openings", []) if o.get("kind") == "door"]
-        matched = 0
-        for o in openings:
-            if o["kind"] != "door":
-                continue
-            for g in g3_doors:
-                if g["plane_id"] != o["plane_id"]:
-                    continue
-                lo = max(o["u_range"][0], g["u_range"][0])
-                hi = min(o["u_range"][1], g["u_range"][1])
-                union = max(o["u_range"][1], g["u_range"][1]) - min(
-                    o["u_range"][0], g["u_range"][0]
-                )
-                if union > 0 and (hi - lo) / union >= 0.3:
-                    matched += 1
-                    break
-        door_matches = {
-            "fused_doors": sum(1 for o in openings if o["kind"] == "door"),
-            "g3_doors_on_property": len(g3_doors),
-            "matched": matched,
-        }
+        fused_doors = [o for o in openings if o["kind"] == "door"]
+        door_matches = match_doors(fused_doors, g3_doors)
 
     # --- finalize furniture boxes
     box_entries: list[dict[str, Any]] = []
@@ -958,6 +1062,8 @@ def run(
         "ray_block_slack_m": RAY_BLOCK_SLACK_M,
         "mirror_wall_dist_m": MIRROR_WALL_DIST_M,
         "mirror_normal_gate": True,
+        "normal_decode": "auto",
+        "door_match": "geometric",
         "furniture_confirm_fraction": FURNITURE_CONFIRM_FRACTION,
     }
     windows = sum(1 for o in openings if o["kind"] == "window")
