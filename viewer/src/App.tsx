@@ -109,6 +109,14 @@ export default function App() {
             case "R":
               staging.rotate(Math.PI / 12);
               break;
+            case "x":
+            case "X":
+              useViewerStore.getState().setXray(staging.toggleXray());
+              break;
+            case "o":
+            case "O":
+              useViewerStore.getState().setSkyboxYaw(viewer.cycleSkyboxYaw());
+              break;
             default:
               return;
           }
