@@ -81,6 +81,11 @@ export class TourViewer {
     return this.activeUuid;
   }
 
+  /** The pano camera -- staging (Layer 2/3) needs it for placement helpers. */
+  getCamera(): FreeCamera {
+    return this.camera;
+  }
+
   /** Load a sweep's cubemap and move the camera to its pose position. */
   async showSweep(uuid: string): Promise<void> {
     const sweep = this.tour.sweeps.find((s) => s.uuid === uuid);
