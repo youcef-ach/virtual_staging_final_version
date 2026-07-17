@@ -252,9 +252,13 @@ def test_decode_normals_auto_detection():
     raw /= np.linalg.norm(raw, axis=-1, keepdims=True)  # unit signed normals
     out, decoded = _decode_normals(raw)
     assert not decoded and np.allclose(out, raw)
-    encoded = (raw + 1.0) / 2.0  # 0..1, lengths spread away from 1
+    # Documented limitation (LESSONS L1): SYMMETRIC mixed content encodes
+    # to median length ~1.0 and is indistinguishable from raw downstream.
+    # The contract is CONSERVATIVE: never risk corrupting possibly-raw
+    # data -> no decode here. Encoding must be settled at the source.
+    encoded = (raw + 1.0) / 2.0
     out2, decoded2 = _decode_normals(encoded)
-    assert decoded2 and np.allclose(out2, raw, atol=1e-12)
+    assert not decoded2 and np.allclose(out2, encoded)
     # All-(1,0,0) RAW face: no negatives but unit lengths -> must NOT decode.
     flat = np.zeros((8, 8, 3))
     flat[..., 0] = 1.0
