@@ -44,7 +44,10 @@ const SKYBOX_BASE: Matrix = Matrix.Scaling(-1, 1, 1).multiply(
   Matrix.RotationX(-Math.PI / 2),
 );
 const SKYBOX_YAW_CANDIDATES_DEG = [0, 90, 180, 270] as const;
-const DEFAULT_YAW_INDEX = 0;
+// 180 deg predicted by the legacy 3d-viewer protocol (q_sweep * q_yawLocal(180)
+// about local Z-up = RotationY(180) in the local Y-up frame) AND by the F5
+// face-mapping +-X/+-Y-swap signature. Confirm visually, then lock.
+const DEFAULT_YAW_INDEX = 2;
 
 /**
  * Layer 1 renderer: the photographic layer. The active sweep's cubemap is an
