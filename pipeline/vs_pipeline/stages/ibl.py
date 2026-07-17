@@ -10,10 +10,18 @@ Locked decisions (2026-07-15, PLAN G5):
 - Validation slice: interior trio (sweeps 50/60/175) + one garden sweep (indices 0-2
   are confirmed outdoor) before the full-property run.
 
-Interim blind highlight boost -- PLACEHOLDER until segmentation-guided highlight
-reconstruction (post-G6), exactly as locked in PLAN:
+Highlight reconstruction (G6 slice 4.3): with ``--seg-dir``, the boost is
+SEGMENTATION-GUIDED -- confined to known emissive regions (window pixels from
+the 7-class masks, SAM-refined preferred, UNION raw-ADE sky / lamp / light /
+chandelier / streetlight / sconce), feathered so no hard mask seam enters the
+convolutions, with a lower knee and a much higher gain cap than the blind
+formula (see ``guided_highlight_boost``). Sweeps without segmentation masks
+fall back to the original blind formula VERBATIM:
 
     C_hdr = C_lin * (1 + 12 * max(0, Y - 0.85) ** 1.5)
+
+The boost configuration is part of the per-sweep output identity: adding
+segmentation masks for a sweep re-bakes it automatically on the next run.
 
 Orientation note: the extracted canonical faces (F4.0, Set A transforms) form a
 seam-consistent cubemap (proven visually in F4.4). The cosine and GGX kernels are
@@ -21,11 +29,13 @@ rotationally symmetric, so the convolution result -- as a cubemap in the SAME fa
 layout as the panos -- is invariant to any global orthogonal relabeling of texel
 directions. We therefore use the standard cubemap face->direction convention below;
 the validation slice must confirm orientation visually (the bright window direction
-in the irradiance map matches the pano).
+in the irradiance map matches the pano). The segmentation masks are stored-layout,
+i.e. pixel-aligned with the faces (the G6 upright fix's guarantee) -- no
+orientation work is needed to apply them here.
 
 CLI:
     python -m vs_pipeline.stages.ibl bake --panos extracted_cubemaps -o ibl_out \
-        --sweeps "1,50,60,175"
+        --sweeps "1,50,60,175" [--seg-dir seg_out]
 """
 
 from __future__ import annotations
@@ -42,13 +52,36 @@ os.environ.setdefault("OPENCV_IO_ENABLE_OPENEXR", "1")
 import cv2  # noqa: E402
 import numpy as np  # noqa: E402
 
+from vs_pipeline.stages.segmentation import CLASS_IDS as _SEG_CLASS_IDS  # noqa: E402
+
 IBL_SCHEMA_VERSION = 1
 FACE_NAMES = ("px", "nx", "py", "ny", "pz", "nz")
 
-# Interim blind highlight boost (locked formula -- see module docstring).
+# Blind highlight boost (locked G5 formula) -- FALLBACK when no segmentation
+# masks exist for a sweep; see module docstring.
 BOOST_KNEE = 0.85
 BOOST_STRENGTH = 12.0
 BOOST_POWER = 1.5
+
+# Segmentation-guided highlight reconstruction (G6 slice 4.3). Mask confidence
+# buys a lower knee and a much higher gain than the blind formula: real windows
+# run 10-100x interior luminance, so the x6 cap stays conservative -- the final
+# judgement is the G8 chrome-sphere gate (parameters are plain constants, an
+# idempotent re-bake away from tuning).
+GUIDED_KNEE = 0.70
+GUIDED_STRENGTH = 24.0
+GUIDED_POWER = 1.5
+GUIDED_MAX_FACTOR = 6.0
+#: Gaussian feather (px, at face resolution) applied to the emissive weight so
+#: no hard mask seam enters the irradiance/GGX convolutions.
+EMISSIVE_FEATHER_PX = 3
+
+#: 7-class id for 'window' -- single source of truth is the segmentation module.
+SEG_WINDOW_CLASS_ID = int(_SEG_CLASS_IDS["window"])
+#: Raw ADE20K label ids that are emissive: sky, windowpane, lamp,
+#: light source, chandelier, streetlight, sconce. Read from the RAW map
+#: because the 7-class map collapses most of these into 'furniture'/'other'.
+EMISSIVE_ADE_IDS = (2, 8, 36, 82, 85, 87, 134)
 
 _LUMA = np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
 _CHUNK = 4096  # output-direction rows per convolution chunk (memory bound)
@@ -76,14 +109,95 @@ def luminance(rgb: np.ndarray) -> np.ndarray:
 
 
 def highlight_boost(lin: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Interim blind boost: returns (boosted_rgb, per-pixel factor).
+    """Blind boost fallback: returns (boosted_rgb, per-pixel factor).
 
-    PLACEHOLDER by design until segmentation-guided highlight reconstruction
-    (post-G6). Identity below Y = BOOST_KNEE, monotonically increasing above.
+    The original G5 interim formula, kept VERBATIM for sweeps without
+    segmentation masks. Identity below Y = BOOST_KNEE, monotonically
+    increasing above.
     """
     y = luminance(lin)
     factor = 1.0 + BOOST_STRENGTH * np.maximum(0.0, y - BOOST_KNEE) ** BOOST_POWER
     return (lin * factor[..., None]).astype(np.float32), factor.astype(np.float32)
+
+
+def guided_highlight_boost(
+    lin: np.ndarray, weight: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Segmentation-guided highlight reconstruction (G6 slice 4.3).
+
+    ``factor = 1 + w * GUIDED_STRENGTH * max(0, Y - GUIDED_KNEE)^GUIDED_POWER``,
+    clipped to GUIDED_MAX_FACTOR, where ``w`` is the feathered emissive weight
+    in [0, 1]. The two failure modes of the blind formula are killed by
+    construction: dark emissive pixels (window at dusk, lamp switched off)
+    receive no boost via the Y-knee, and bright NON-emissive pixels (sunlit
+    white walls) receive none via the mask.
+    """
+    y = luminance(lin)
+    factor = 1.0 + GUIDED_STRENGTH * np.asarray(weight, dtype=np.float32) * (
+        np.maximum(0.0, y - GUIDED_KNEE) ** GUIDED_POWER
+    )
+    factor = np.clip(factor, 1.0, GUIDED_MAX_FACTOR)
+    return (lin * factor[..., None]).astype(np.float32), factor.astype(np.float32)
+
+
+def load_emissive_mask(seg_dir: Path, sweep_uuid: str, face: str) -> np.ndarray | None:
+    """Bool emissive mask for one face at native mask resolution, or None.
+
+    Window pixels from the 7-class map (SAM-refined preferred) UNION raw-ADE
+    emissive labels (EMISSIVE_ADE_IDS). Masks are stored-layout and therefore
+    pixel-aligned with the extracted faces. None = no segmentation for this
+    face (caller falls back to the blind boost).
+    """
+    sweep_dir = seg_dir / sweep_uuid
+    cls_path = sweep_dir / f"{face}_cls_refined.png"
+    if not cls_path.is_file():
+        cls_path = sweep_dir / f"{face}_cls.png"
+    if not cls_path.is_file():
+        return None
+    cls = cv2.imread(str(cls_path), cv2.IMREAD_GRAYSCALE)
+    if cls is None:
+        return None
+    mask = cls == SEG_WINDOW_CLASS_ID
+    ade = cv2.imread(str(sweep_dir / f"{face}_ade.png"), cv2.IMREAD_GRAYSCALE)
+    if ade is not None and ade.shape == cls.shape:
+        mask |= np.isin(ade, EMISSIVE_ADE_IDS)
+    return mask
+
+
+def _feathered_weight(mask: np.ndarray, size: int) -> np.ndarray:
+    """Bool mask -> soft [0, 1] weight at ``size`` (linear resize + Gaussian)."""
+    w = np.asarray(mask, dtype=np.float32)
+    if w.shape != (size, size):
+        w = cv2.resize(w, (size, size), interpolation=cv2.INTER_LINEAR)
+    if EMISSIVE_FEATHER_PX > 0:
+        k = 2 * EMISSIVE_FEATHER_PX + 1
+        w = cv2.GaussianBlur(w, (k, k), 0)
+    return np.clip(w, 0.0, 1.0).astype(np.float32)
+
+
+def boost_config(mode: str) -> dict[str, Any]:
+    """Boost configuration dict for the given mode -- part of the per-sweep
+    output identity (a changed config or mode re-bakes the sweep)."""
+    if mode == "blind":
+        return {
+            "mode": "blind",
+            "knee": BOOST_KNEE,
+            "strength": BOOST_STRENGTH,
+            "power": BOOST_POWER,
+            "note": "fallback when no segmentation masks exist for the sweep",
+        }
+    if mode == "seg_guided":
+        return {
+            "mode": "seg_guided",
+            "knee": GUIDED_KNEE,
+            "strength": GUIDED_STRENGTH,
+            "power": GUIDED_POWER,
+            "max_factor": GUIDED_MAX_FACTOR,
+            "feather_px": EMISSIVE_FEATHER_PX,
+            "window_class_id": SEG_WINDOW_CLASS_ID,
+            "emissive_ade_ids": list(EMISSIVE_ADE_IDS),
+        }
+    raise ValueError(f"unknown boost mode: {mode}")
 
 
 # ------------------------------------------------------------------- cube geometry
@@ -264,7 +378,12 @@ def parse_sweep_selection(spec: str) -> set[int]:
     return out
 
 
-def _outputs_current(meta_path: Path, sweep_out: Path, params: IblParams) -> bool:
+def _outputs_current(
+    meta_path: Path,
+    sweep_out: Path,
+    params: IblParams,
+    expected_boost: dict[str, Any] | None = None,
+) -> bool:
     if not meta_path.is_file():
         return False
     try:
@@ -273,6 +392,8 @@ def _outputs_current(meta_path: Path, sweep_out: Path, params: IblParams) -> boo
         return False
     if meta.get("params") != params.to_dict():
         return False
+    if expected_boost is not None and meta.get("boost") != expected_boost:
+        return False  # boost mode/config changed (e.g. seg masks appeared) -> re-bake
     files = meta.get("files", {})
     names = [files.get("irradiance", "")] + list(files.get("specular_mips", []))
     return all(name and (sweep_out / name).is_file() for name in names)
@@ -312,10 +433,12 @@ def _review_image(
     irr: np.ndarray,
     mips: list[np.ndarray],
     boost_max: float,
+    mode: str = "blind",
 ) -> np.ndarray:
     """Per-face rows: pano | boosted | boost heatmap | irradiance | mip0..N (RGB)."""
     rows = []
     denom = max(boost_max - 1.0, 1e-6)
+    mode_tag = "seg" if mode == "seg_guided" else "blind"
     for i, face in enumerate(FACE_NAMES):
         panels = [
             _panel((np.clip(orig[face], 0, 1) * 255).astype(np.uint8), f"{face} pano"),
@@ -323,7 +446,7 @@ def _review_image(
         ]
         heat_u8 = (np.clip((factors[face] - 1.0) / denom, 0, 1) * 255).astype(np.uint8)
         heat = cv2.cvtColor(cv2.applyColorMap(heat_u8, cv2.COLORMAP_INFERNO), cv2.COLOR_BGR2RGB)
-        panels.append(_panel(heat, "boost"))
+        panels.append(_panel(heat, f"boost {mode_tag}"))
         panels.append(_panel(_tonemap_u8(irr[i]), "irr"))
         panels.extend(_panel(_tonemap_u8(mip[i]), f"mip{m}") for m, mip in enumerate(mips))
         rows.append(np.hstack([np.pad(p, ((0, 2), (0, 2), (0, 0))) for p in panels]))
@@ -338,6 +461,7 @@ def bake(
     force: bool = False,
     write_exr: bool = True,
     write_review: bool = True,
+    seg_dir: Path | None = None,
 ) -> dict[str, list[str]]:
     """Bake IBL products for the selected sweeps; idempotent per sweep."""
     manifest = json.loads((panos_dir / "manifest.json").read_text(encoding="utf-8"))
@@ -357,10 +481,23 @@ def bake(
             print(f"[{idx:03d}] {uuid}: incomplete faces -> FAILED")
             summary["failed"].append(uuid)
             continue
+
+        # Boost mode is decided by mask availability and is part of the output
+        # identity: adding masks for a sweep re-bakes it automatically.
+        masks: dict[str, np.ndarray] | None = None
+        if seg_dir is not None:
+            loaded = {f: load_emissive_mask(seg_dir, uuid, f) for f in FACE_NAMES}
+            if all(v is not None for v in loaded.values()):
+                masks = loaded  # type: ignore[assignment]
+            elif any(v is not None for v in loaded.values()):
+                print(f"[{idx:03d}] {uuid}: partial seg masks -> blind-boost fallback")
+        mode = "seg_guided" if masks is not None else "blind"
+        expected_boost = boost_config(mode)
+
         sweep_out = out_dir / uuid
         meta_path = sweep_out / "ibl_meta.json"
-        if not force and _outputs_current(meta_path, sweep_out, params):
-            print(f"[{idx:03d}] {uuid}: up to date -> skipped")
+        if not force and _outputs_current(meta_path, sweep_out, params, expected_boost):
+            print(f"[{idx:03d}] {uuid}: up to date ({mode}) -> skipped")
             summary["skipped"].append(uuid)
             continue
 
@@ -380,7 +517,12 @@ def bake(
         boost_fracs: list[float] = []
         boost_max = 1.0
         for face, srgb in orig.items():
-            b, fac = highlight_boost(srgb_to_linear(srgb))
+            lin = srgb_to_linear(srgb)
+            if masks is not None:
+                weight = _feathered_weight(masks[face], lin.shape[0])
+                b, fac = guided_highlight_boost(lin, weight)
+            else:
+                b, fac = highlight_boost(lin)
             boosted[face], factors[face] = b, fac
             boost_fracs.append(float((fac > 1.0).mean()))
             boost_max = max(boost_max, float(fac.max()))
@@ -416,7 +558,7 @@ def bake(
         if write_review:
             review_dir = out_dir / "review"
             review_dir.mkdir(parents=True, exist_ok=True)
-            composite = _review_image(orig, boosted, factors, irr, mips, boost_max)
+            composite = _review_image(orig, boosted, factors, irr, mips, boost_max, mode)
             cv2.imwrite(
                 str(review_dir / f"ibl_{idx:03d}_{uuid}.png"),
                 cv2.cvtColor(composite, cv2.COLOR_RGB2BGR),
@@ -424,6 +566,7 @@ def bake(
 
         stats = {
             "finite": finite,
+            "boost_mode": mode,
             "boost_pixel_fraction": float(np.mean(boost_fracs)),
             "boost_max_factor": boost_max,
             "env_base_mean_luma": base_luma,
@@ -437,13 +580,7 @@ def bake(
             "params": params.to_dict(),
             "face_order": list(FACE_NAMES),
             "roughness_per_mip": params.roughness_values(),
-            "boost": {
-                "knee": BOOST_KNEE,
-                "strength": BOOST_STRENGTH,
-                "power": BOOST_POWER,
-                "note": "interim blind boost; placeholder until segmentation-guided "
-                "highlight reconstruction",
-            },
+            "boost": expected_boost,
             "files": files,
             "stats": stats,
         }
@@ -451,7 +588,7 @@ def bake(
 
         ratio = mip_lumas[-1] / max(base_luma, 1e-9)
         print(
-            f"[{idx:03d}] {uuid}: boost {np.mean(boost_fracs):6.2%} px "
+            f"[{idx:03d}] {uuid}: boost[{mode}] {np.mean(boost_fracs):6.2%} px "
             f"(max x{boost_max:.2f})  luma base {base_luma:.4f} irr {irr_luma:.4f} "
             f"mip4/base {ratio:.3f}  {'OK' if finite else 'NAN/INF!'}"
         )
@@ -482,6 +619,7 @@ def assemble_seeds(out_dir: Path) -> Path:
                 "specular_mips": [f"{uuid}/{n}" for n in meta["files"]["specular_mips"]],
                 "roughness_per_mip": meta["roughness_per_mip"],
                 "params": meta["params"],
+                "boost": meta.get("boost"),
                 "stats": meta["stats"],
             }
         )
@@ -490,7 +628,10 @@ def assemble_seeds(out_dir: Path) -> Path:
         "schema_version": IBL_SCHEMA_VERSION,
         "engine": "numpy-v1 (cmft drop-in seam: vs_pipeline.stages.ibl.Convolver)",
         "face_order": list(FACE_NAMES),
-        "boost": {"knee": BOOST_KNEE, "strength": BOOST_STRENGTH, "power": BOOST_POWER},
+        "boost_modes": {
+            "blind": boost_config("blind"),
+            "seg_guided": boost_config("seg_guided"),
+        },
         "sweep_count": len(sweeps),
         "sweeps": sweeps,
     }
@@ -512,6 +653,13 @@ def main(argv: list[str] | None = None) -> int:
     p_bake.add_argument("--output", "-o", type=Path, default=Path("ibl_out"))
     p_bake.add_argument(
         "--sweeps", type=str, default=None, help="index selection, e.g. '1,50,60,175' or '0-2'"
+    )
+    p_bake.add_argument(
+        "--seg-dir",
+        type=Path,
+        default=None,
+        help="G6 segmentation output dir (seg_out): segmentation-guided highlight "
+        "reconstruction on sweeps with masks; others fall back to the blind boost",
     )
     p_bake.add_argument("--diffuse-size", type=int, default=64)
     p_bake.add_argument("--irr-source-size", type=int, default=32)
@@ -539,6 +687,7 @@ def main(argv: list[str] | None = None) -> int:
         force=args.force,
         write_exr=not args.no_exr,
         write_review=not args.no_review,
+        seg_dir=args.seg_dir,
     )
     return 0
 

@@ -125,3 +125,86 @@ def test_bake_end_to_end_idempotent_and_finite(tmp_path):
     # Forced run rebakes.
     summary3 = bake(panos, out, params, force=True, write_exr=False, write_review=False)
     assert summary3["baked"] == ["sweep-test"]
+
+
+# ----------------------------- G6 slice 4.3: segmentation-guided highlight boost
+
+
+def test_guided_boost_confined_to_mask_capped_and_kneed():
+    from vs_pipeline.stages.ibl import GUIDED_MAX_FACTOR, guided_highlight_boost
+
+    saturated = np.full((4, 4, 3), 1.0, dtype=np.float32)
+    weight = np.zeros((4, 4), dtype=np.float32)
+    weight[:2, :] = 1.0  # emissive top half
+    _, factor = guided_highlight_boost(saturated, weight)
+    assert float(factor[:2].min()) > 1.5  # saturated emissive pixels boosted hard
+    assert np.allclose(factor[2:], 1.0)  # outside the mask: identity by construction
+    assert float(factor.max()) <= GUIDED_MAX_FACTOR + 1e-6
+
+    # Dark emissive pixels (window at dusk, lamp off) stay identity via the knee.
+    dark = np.full((4, 4, 3), 0.3, dtype=np.float32)
+    _, f_dark = guided_highlight_boost(dark, np.ones((4, 4), dtype=np.float32))
+    assert np.allclose(f_dark, 1.0)
+
+
+def test_load_emissive_mask_union_and_window_id_contract(tmp_path):
+    from vs_pipeline.stages.ibl import (
+        EMISSIVE_ADE_IDS,
+        SEG_WINDOW_CLASS_ID,
+        load_emissive_mask,
+    )
+    from vs_pipeline.stages.segmentation import CLASS_IDS
+
+    assert SEG_WINDOW_CLASS_ID == CLASS_IDS["window"]
+
+    sweep = tmp_path / "seg" / "u1"
+    sweep.mkdir(parents=True)
+    cls = np.zeros((8, 8), dtype=np.uint8)
+    cls[0, 0] = SEG_WINDOW_CLASS_ID
+    ade = np.zeros((8, 8), dtype=np.uint8)
+    ade[7, 7] = EMISSIVE_ADE_IDS[0]  # sky
+    assert cv2.imwrite(str(sweep / "px_cls.png"), cls)
+    assert cv2.imwrite(str(sweep / "px_ade.png"), ade)
+
+    mask = load_emissive_mask(tmp_path / "seg", "u1", "px")
+    assert mask is not None
+    assert mask[0, 0]  # window from the 7-class map
+    assert mask[7, 7]  # sky from the RAW ADE map, unioned in
+    assert not mask[3, 3]
+    assert load_emissive_mask(tmp_path / "seg", "u1", "py") is None
+
+
+def test_bake_seg_guided_mode_and_identity_bump(tmp_path):
+    from vs_pipeline.stages.ibl import SEG_WINDOW_CLASS_ID
+
+    panos = _write_synth_panos(tmp_path)
+    out = tmp_path / "ibl"
+    params = IblParams(diffuse_size=8, irr_source_size=8, spec_size=16, spec_mips=3)
+
+    # Blind bake first (no seg masks anywhere).
+    s1 = bake(panos, out, params, write_exr=False, write_review=False)
+    assert s1["baked"] == ["sweep-test"]
+    meta = json.loads((out / "sweep-test" / "ibl_meta.json").read_text(encoding="utf-8"))
+    assert meta["boost"]["mode"] == "blind"
+
+    # Seg masks appear (window over the bright patch) -> identity bump: the
+    # SAME sweep must re-bake in seg_guided mode without --force.
+    seg = tmp_path / "seg" / "sweep-test"
+    seg.mkdir(parents=True)
+    for face in FACE_NAMES:
+        cls = np.zeros((32, 32), dtype=np.uint8)
+        cls[4:12, 4:12] = SEG_WINDOW_CLASS_ID
+        assert cv2.imwrite(str(seg / f"{face}_cls.png"), cls)
+    s2 = bake(
+        panos, out, params, seg_dir=tmp_path / "seg", write_exr=False, write_review=False
+    )
+    assert s2["baked"] == ["sweep-test"]
+    meta = json.loads((out / "sweep-test" / "ibl_meta.json").read_text(encoding="utf-8"))
+    assert meta["boost"]["mode"] == "seg_guided"
+    assert meta["stats"]["boost_pixel_fraction"] > 0.0  # bright patch inside the mask
+
+    # Same config again -> idempotent skip.
+    s3 = bake(
+        panos, out, params, seg_dir=tmp_path / "seg", write_exr=False, write_review=False
+    )
+    assert s3["skipped"] == ["sweep-test"] and not s3["baked"]
