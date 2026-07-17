@@ -26,6 +26,11 @@ export const GROUP_ASSET = 2;
 const TRIPOD_HEIGHT_M = 1.4;
 const INITIAL_PLACE_DISTANCE_M = 1.8;
 
+/** X-ray debug view scope (X key cycles off -> local -> full). */
+export type XrayMode = "off" | "local" | "full";
+/** LOCAL X-ray: only meshes whose bounding box comes within this range show. */
+const LOCAL_XRAY_RADIUS_M = 5;
+
 const isFloor = (mesh: AbstractMesh): boolean =>
   mesh.isPickable && mesh.name.includes("floor");
 
@@ -43,7 +48,7 @@ export class StagingLayer {
   private readonly xrayDetail: StandardMaterial;
   private readonly shellMeshes: AbstractMesh[] = [];
   private readonly detailMeshes: AbstractMesh[] = [];
-  private xray = false;
+  private xrayMode: XrayMode = "off";
   private detailsEnabled = true;
   private assetRoot: TransformNode | null = null;
   private userPlaced = false;
@@ -94,16 +99,41 @@ export class StagingLayer {
     return this.assetRoot !== null;
   }
 
-  /** Toggle the X-ray debug view on the proxy (X key). Returns the new state. */
-  toggleXray(): boolean {
-    this.xray = !this.xray;
+  /**
+   * Cycle the X-ray debug view (X key): off -> local -> full -> off.
+   * LOCAL shows only geometry within ~5 m of the camera (approximately the
+   * current room); everything farther keeps occluding invisibly, so runtime
+   * behavior stays honest while the view stays readable.
+   */
+  cycleXray(cameraPos: Vector3): XrayMode {
+    this.xrayMode =
+      this.xrayMode === "off" ? "local" : this.xrayMode === "local" ? "full" : "off";
+    this.applyXray(cameraPos);
+    return this.xrayMode;
+  }
+
+  /** Re-apply the LOCAL X-ray scope after the camera moved (sweep jump). */
+  refreshXray(cameraPos: Vector3): void {
+    if (this.xrayMode !== "off") {
+      this.applyXray(cameraPos);
+    }
+  }
+
+  private applyXray(cameraPos: Vector3): void {
+    const near = (mesh: AbstractMesh): boolean => {
+      if (this.xrayMode === "full") return true;
+      const bb = mesh.getBoundingInfo().boundingBox;
+      const dx = Math.max(bb.minimumWorld.x - cameraPos.x, 0, cameraPos.x - bb.maximumWorld.x);
+      const dy = Math.max(bb.minimumWorld.y - cameraPos.y, 0, cameraPos.y - bb.maximumWorld.y);
+      const dz = Math.max(bb.minimumWorld.z - cameraPos.z, 0, cameraPos.z - bb.maximumWorld.z);
+      return dx * dx + dy * dy + dz * dz <= LOCAL_XRAY_RADIUS_M * LOCAL_XRAY_RADIUS_M;
+    };
     for (const mesh of this.shellMeshes) {
-      mesh.material = this.xray ? this.xrayShell : this.occluder;
+      mesh.material = this.xrayMode !== "off" && near(mesh) ? this.xrayShell : this.occluder;
     }
     for (const mesh of this.detailMeshes) {
-      mesh.material = this.xray ? this.xrayDetail : this.occluder;
+      mesh.material = this.xrayMode !== "off" && near(mesh) ? this.xrayDetail : this.occluder;
     }
-    return this.xray;
   }
 
   /**
@@ -150,8 +180,7 @@ export class StagingLayer {
         for (const mesh of result.meshes) {
           mesh.renderingGroupId = GROUP_PROXY;
           if (mesh.getTotalVertices() > 0) {
-            const xrayMat = isDetails ? this.xrayDetail : this.xrayShell;
-            mesh.material = this.xray ? xrayMat : this.occluder;
+            mesh.material = this.occluder; // X-ray scope re-applies on demand
             mesh.isPickable = !isDetails && mesh.name.includes("floor");
             if (mesh.isPickable) {
               floors += 1;

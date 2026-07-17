@@ -20,8 +20,8 @@ interface ViewerState {
   /** Layer 2/3 load summaries (G7); null until the loads settle. */
   proxyState: string | null;
   assetState: string | null;
-  /** G7.1 debug/calibration state: proxy X-ray view + pano yaw candidate. */
-  xray: boolean;
+  /** G7.1 debug/calibration state: proxy X-ray mode + pano yaw candidate. */
+  xray: string | null;
   skyboxYawDeg: number | null;
   setBackend: (backend: EngineBackend) => void;
   setFps: (fps: number) => void;
