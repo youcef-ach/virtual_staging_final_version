@@ -278,11 +278,18 @@ test is the G8 gate).
 - Research: inverse tone mapping / LDR-to-HDR panorama reconstruction
   (StyleLight, EverLight), indoor lighting estimation from panoramas.
 
-### 18. G6 segmentation — STARTED 2026-07-15 (slice 1: per-face 2D inference
-shipped). Consumers waiting: Gate-1 mask feedback (#7), window openings (#3),
-segmentation-guided highlight boost (#17), Year-2 room emptying. Later
-slices: SAM boundary refinement, 2D→3D fusion (G-buffer depth lift → wall
-openings + 3D furniture boxes), Gate-2 click-fix mask editor.
+### 18. G6 segmentation — COMPLETE 2026-07-17 (slices 1–4)
+Shipped: per-face inference (Swin-T + upright fix, slice 1), SAM ViT-B
+refinement (slice 2), 2D→3D fusion (slice 3: windows reprojection-proven,
+22 furniture boxes; mirror detector parked → #2), consumer wiring (slice 4:
+proxy window cutouts #3, Gate-1 glass/mirror exclusion #7 — queue 47 → 41,
+segmentation-guided highlight reconstruction #17 — blind boost retired on
+masked sweeps). Gate-2 click-fix editor: DEFERRED by decision → #22
+(operator-override convention shipped instead). Still pending under the
+slice-only policy (#14b): full-property inference — only the slice sweeps
++ the 47 Gate-1-flagged sweeps have masks so far; the blind IBL boost and
+unmasked Gate-1 scoring remain the documented fallback everywhere else.
+Model-variant quality delta (Swin-T vs Swin-L) still unmeasured → #20.
 
 ### 20. G6 model variants constrained by dev hardware — DEFERRED (worker upgrade)
 Dev GPU is a 4 GB GTX 1650-class laptop card. Locked LOCAL configuration:
