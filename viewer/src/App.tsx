@@ -71,6 +71,8 @@ export default function App() {
                   : "proxy \u2717 copy proxy_shell.glb (+ proxy_details.glb) into viewer/public/data/",
               );
           });
+        // G7.1 ground-truth reference (optional file): textured MatterPak mesh.
+        void staging.loadReference(`${DATA_BASE_URL}/reference.glb`);
         void staging
           .loadAsset(`${DATA_BASE_URL}/asset.glb`)
           .then(() => {

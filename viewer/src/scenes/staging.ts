@@ -150,6 +150,62 @@ export class StagingLayer {
     return this.detailsEnabled;
   }
 
+  private refRoot: TransformNode | null = null;
+  private refZup = false;
+
+  /**
+   * G7.1 ground-truth reference: the textured MatterPak mesh (OBJ exported
+   * as GLB). Its textures DERIVE from the panos, so with a correct pano
+   * orientation the photo and the mesh must match nearly feature-for-feature
+   * -- the strongest in-viewer alignment evidence (F5 ghosting philosophy).
+   * Hidden until toggled (B); N applies rotX-90 if the GLB kept the
+   * MatterPak Z-up frame.
+   */
+  async loadReference(url: string): Promise<boolean> {
+    try {
+      const result = await ImportMeshAsync(url, this.scene);
+      const root = new TransformNode("reference-root", this.scene);
+      for (const mesh of result.meshes) {
+        if (!mesh.parent) {
+          mesh.parent = root;
+        }
+        mesh.renderingGroupId = GROUP_PROXY;
+        mesh.isPickable = false;
+      }
+      root.setEnabled(false); // B shows it
+      this.refRoot = root;
+      console.info(
+        `[staging] reference mesh loaded (${result.meshes.length} meshes) -- ` +
+          "B toggles visibility, N toggles the Z-up frame fix",
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Toggle the textured reference mesh (B key). Returns the new state. */
+  toggleReference(): boolean {
+    if (!this.refRoot) {
+      console.info("[staging] no reference.glb loaded (copy it into viewer/public/data/)");
+      return false;
+    }
+    const next = !this.refRoot.isEnabled();
+    this.refRoot.setEnabled(next);
+    return next;
+  }
+
+  /** Toggle the Z-up -> Y-up conversion on the reference root (N key). */
+  toggleReferenceFrame(): boolean {
+    if (!this.refRoot) return false;
+    this.refZup = !this.refZup;
+    this.refRoot.rotation.x = this.refZup ? -Math.PI / 2 : 0;
+    console.info(
+      `[staging] reference frame: ${this.refZup ? "Z-up source (rotX-90 applied)" : "as-authored (Y-up)"}`,
+    );
+    return this.refZup;
+  }
+
   /**
    * Load proxy GLBs (shell + details) as invisible depth-only occluders.
    * Missing files are reported, not fatal (the tour must keep working).
