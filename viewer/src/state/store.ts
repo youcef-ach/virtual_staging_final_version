@@ -20,7 +20,7 @@ interface ViewerState {
   /** Layer 2/3 load summaries (G7); null until the loads settle. */
   proxyState: string | null;
   assetState: string | null;
-  /** G7.1 debug/calibration state: proxy X-ray mode + pano yaw candidate. */
+  /** G7.1 debug/calibration state: proxy X-ray mode (null = off) + pano yaw. */
   xray: string | null;
   skyboxYawDeg: number | null;
   setBackend: (backend: EngineBackend) => void;
@@ -31,7 +31,7 @@ interface ViewerState {
   setActiveSweep: (uuid: string) => void;
   setProxyState: (message: string) => void;
   setAssetState: (message: string) => void;
-  setXray: (on: boolean) => void;
+  setXray: (mode: string | null) => void;
   setSkyboxYaw: (deg: number) => void;
 }
 
@@ -44,7 +44,7 @@ export const useViewerStore = create<ViewerState>((set) => ({
   activeSweepUuid: null,
   proxyState: null,
   assetState: null,
-  xray: false,
+  xray: null,
   skyboxYawDeg: null,
   setBackend: (backend) => set({ backend }),
   setFps: (fps) => set({ fps }),

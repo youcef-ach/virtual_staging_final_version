@@ -47,12 +47,16 @@ export default function App() {
 
         const viewer = new TourViewer(engine, tour);
         viewerRef.current = viewer;
-        viewer.onSweepShown = (uuid) => useViewerStore.getState().setActiveSweep(uuid);
         store.setSkyboxYaw(viewer.skyboxYawDeg);
 
         // G7: Layer 2 (proxy occluders) + Layer 3 (staged asset). Missing
         // files degrade gracefully -- the tour keeps working either way.
         const staging = new StagingLayer(viewer.scene);
+        viewer.onSweepShown = (uuid) => {
+          useViewerStore.getState().setActiveSweep(uuid);
+          // LOCAL X-ray scope follows the camera across sweep jumps.
+          staging.refreshXray(viewer.getCamera().position);
+        };
         void staging
           .loadProxy([
             `${DATA_BASE_URL}/proxy_shell.glb`,
@@ -110,9 +114,11 @@ export default function App() {
               staging.rotate(Math.PI / 12);
               break;
             case "x":
-            case "X":
-              useViewerStore.getState().setXray(staging.toggleXray());
+            case "X": {
+              const mode = staging.cycleXray(viewer.getCamera().position);
+              useViewerStore.getState().setXray(mode === "off" ? null : mode);
               break;
+            }
             case "o":
             case "O":
               useViewerStore.getState().setSkyboxYaw(viewer.cycleSkyboxYaw());
@@ -189,7 +195,7 @@ export default function App() {
         {proxyState && <span>{proxyState}</span>}
         {assetState && <span>{assetState}</span>}
         {skyboxYawDeg !== null && <span>pano yaw {skyboxYawDeg}\u00b0 (O)</span>}
-        {xray && <span>X-RAY (X)</span>}
+        {xray && <span>X-RAY {xray} (X)</span>}
       </div>
 
       {status === "loading" && <div className="overlay">Loading tour\u2026</div>}
@@ -206,10 +212,10 @@ export default function App() {
             <span>Sweeps ({sweeps.length})</span>
             <span className="nav-buttons">
               <button onClick={() => goNeighbor(-1)} aria-label="previous sweep">
-                \u2190
+                {"\u2190"}
               </button>
               <button onClick={() => goNeighbor(1)} aria-label="next sweep">
-                \u2192
+                {"\u2192"}
               </button>
             </span>
           </header>
@@ -220,7 +226,7 @@ export default function App() {
                   className={sweep.uuid === activeSweepUuid ? "active" : ""}
                   onClick={() => goTo(sweep.uuid)}
                 >
-                  #{String(sweep.index).padStart(3, "0")} \u00b7 {sweep.uuid.slice(0, 8)}
+                  #{String(sweep.index).padStart(3, "0")} {"\u00b7"} {sweep.uuid.slice(0, 8)}
                 </button>
               </li>
             ))}
