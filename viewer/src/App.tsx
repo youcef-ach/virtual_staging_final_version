@@ -117,6 +117,10 @@ export default function App() {
             case "O":
               useViewerStore.getState().setSkyboxYaw(viewer.cycleSkyboxYaw());
               break;
+            case "p":
+            case "P":
+              viewer.toggleSkybox();
+              break;
             default:
               return;
           }

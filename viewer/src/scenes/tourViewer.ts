@@ -111,6 +111,15 @@ export class TourViewer {
     return this.skyboxYawDeg;
   }
 
+  /** Toggle the pano skybox (P key): proxy-only debug view. Returns new state. */
+  toggleSkybox(): boolean {
+    const skybox = this.scene.getMeshByName("skybox");
+    if (!skybox) return true;
+    const next = !skybox.isEnabled();
+    skybox.setEnabled(next);
+    return next;
+  }
+
   /** Load a sweep's cubemap and move the camera to its pose position. */
   async showSweep(uuid: string): Promise<void> {
     const sweep = this.tour.sweeps.find((s) => s.uuid === uuid);
@@ -151,12 +160,21 @@ export class TourViewer {
     this.scene.dispose();
   }
 
-  /** F4.4 base orientation composed with the G7.1 yaw candidate. */
+  /**
+   * F4.4 base orientation composed with the G7.1 yaw candidate.
+   *
+   * COMPOSITION ORDER MATTERS (round-1 harness bug): Babylon's A.multiply(B)
+   * applies A THEN B to the sampled direction. The yaw must act on the
+   * WORLD-space direction BEFORE the world->cube conversion (SKYBOX_BASE),
+   * so it PRE-multiplies. Post-multiplying rotated around the cube frame's
+   * Y axis -- horizontal after rotX-90 -- pitching the pano down instead of
+   * yawing it (observed at yaw 180).
+   */
   private applySkyboxOrientation(texture: CubeTexture | null): void {
     if (!texture) return;
     const yawRad = (this.skyboxYawDeg * Math.PI) / 180;
     texture.setReflectionTextureMatrix(
-      SKYBOX_BASE.multiply(Matrix.RotationY(yawRad)),
+      Matrix.RotationY(yawRad).multiply(SKYBOX_BASE),
     );
   }
 
