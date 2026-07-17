@@ -137,6 +137,14 @@ export default function App() {
             case "D":
               staging.toggleDetails();
               break;
+            case "b":
+            case "B":
+              staging.toggleReference();
+              break;
+            case "n":
+            case "N":
+              staging.toggleReferenceFrame();
+              break;
             case "[":
               useViewerStore.getState().setSkyboxYaw(viewer.nudgeYawFine(-2));
               break;
