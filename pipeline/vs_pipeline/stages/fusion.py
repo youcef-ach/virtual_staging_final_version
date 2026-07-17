@@ -112,6 +112,10 @@ MIRROR_MIN_AREA_FRAC = 0.005  # of the face area
 MIRROR_NORMAL_MAX_Y = 0.3
 MIRROR_NORMAL_ALIGN_MIN = 0.7
 
+#: Geometric door cross-check gates (plane_id-agnostic; see match_doors).
+DOOR_MATCH_HORIZ_M = 0.75
+DOOR_MATCH_V_OVERLAP_M = 0.2
+
 
 # ------------------------------------------------------------------ frames & alignment
 
