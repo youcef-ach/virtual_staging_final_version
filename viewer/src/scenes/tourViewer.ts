@@ -17,22 +17,34 @@ const DRAG_SENSITIVITY = 0.0025;
 const PITCH_LIMIT = Math.PI / 2 - 0.02;
 
 /**
- * F4.4 LOCKED calibration (validated 2026-07-11 on the 198-sweep apartment):
- * extracted faces are in the scanner Z-up frame, the viewer world is
- * right-handed Y-up. Correction = mirror X, then rotX-90, applied to the cube
- * texture's reflection matrix at runtime — Layer 1 pixels stay untouched.
- * Do not change without re-running the F4.4 visual calibration.
+ * F4.4 locked the mirror + Z-up->Y-up part of the pano orientation
+ * (mirrorX . rotX-90 on the cube texture's reflection matrix, runtime-only,
+ * Layer 1 pixels untouched).
+ *
+ * G7.1 finding: every F4.4 acceptance criterion (seams, up/down, text
+ * readability, cross-sweep continuity) is INVARIANT under a global yaw about
+ * the vertical axis -- the residual yaw only became observable once Layer 2
+ * world geometry composited with the photography for the first time.
+ *
+ * The F5 face-mapping calibration already measured that residual's signature:
+ * extracted faces have +-X AND +-Y swapped vs the rendered Matterport-frame
+ * faces (= rotZ180 in the scanner frame = 180 deg yaw in the runtime Y-up
+ * frame). Default candidate below is therefore 180 deg; the O key cycles
+ * 0/90/180/270 for the X-ray calibration pass. Lock the winning value and
+ * remove the harness afterwards -- same protocol as F4.4.
  */
-const SKYBOX_ORIENTATION: Matrix = Matrix.Scaling(-1, 1, 1).multiply(
+const SKYBOX_BASE: Matrix = Matrix.Scaling(-1, 1, 1).multiply(
   Matrix.RotationX(-Math.PI / 2),
 );
+const SKYBOX_YAW_CANDIDATES_DEG = [0, 90, 180, 270] as const;
+const DEFAULT_YAW_INDEX = 2; // 180 deg -- predicted by the F5 face-mapping evidence
 
 /**
  * Layer 1 renderer: the photographic layer. The active sweep's cubemap is an
  * unlit skybox, rendered as-is, never modified (visual truth).
  *
  * Camera: inside-out look-around (FreeCamera + deterministic drag handler).
- * All orientation goes through applyLook() — one code path for the initial
+ * All orientation goes through applyLook() -- one code path for the initial
  * view, sweep jumps and drags (avoids RH TargetCamera path discrepancies).
  * Yaw/pitch persist across sweep jumps for continuity.
  *
@@ -48,6 +60,7 @@ export class TourViewer {
   private activeUuid: string | null = null;
   private yaw = 0;
   private pitch = 0;
+  private yawIndex = DEFAULT_YAW_INDEX;
   private detachControls: (() => void) | null = null;
 
   constructor(
@@ -55,7 +68,7 @@ export class TourViewer {
     private readonly tour: TourData,
   ) {
     this.scene = new Scene(engine);
-    // The runtime frame (Coordinate Lock Rule) is right-handed Y-up — match it.
+    // The runtime frame (Coordinate Lock Rule) is right-handed Y-up -- match it.
     this.scene.useRightHandedSystem = true;
     this.scene.clearColor = new Color4(0, 0, 0, 1);
 
@@ -86,6 +99,18 @@ export class TourViewer {
     return this.camera;
   }
 
+  /** Current pano yaw-correction candidate (degrees, G7.1 calibration harness). */
+  get skyboxYawDeg(): number {
+    return SKYBOX_YAW_CANDIDATES_DEG[this.yawIndex];
+  }
+
+  /** Cycle the pano yaw candidate (O key). Returns the new value in degrees. */
+  cycleSkyboxYaw(): number {
+    this.yawIndex = (this.yawIndex + 1) % SKYBOX_YAW_CANDIDATES_DEG.length;
+    this.applySkyboxOrientation(this.activeTexture);
+    return this.skyboxYawDeg;
+  }
+
   /** Load a sweep's cubemap and move the camera to its pose position. */
   async showSweep(uuid: string): Promise<void> {
     const sweep = this.tour.sweeps.find((s) => s.uuid === uuid);
@@ -96,7 +121,7 @@ export class TourViewer {
     // Unique cache key per sweep: Babylon caches cube textures by rootUrl.
     const texture = await this.loadCubeTexture(`sweep:${sweep.uuid}`, files);
     texture.coordinatesMode = Texture.SKYBOX_MODE;
-    texture.setReflectionTextureMatrix(SKYBOX_ORIENTATION);
+    this.applySkyboxOrientation(texture);
 
     const previous = this.activeTexture;
     this.skyboxMaterial.reflectionTexture = texture;
@@ -124,6 +149,15 @@ export class TourViewer {
     this.detachControls = null;
     this.activeTexture?.dispose();
     this.scene.dispose();
+  }
+
+  /** F4.4 base orientation composed with the G7.1 yaw candidate. */
+  private applySkyboxOrientation(texture: CubeTexture | null): void {
+    if (!texture) return;
+    const yawRad = (this.skyboxYawDeg * Math.PI) / 180;
+    texture.setReflectionTextureMatrix(
+      SKYBOX_BASE.multiply(Matrix.RotationY(yawRad)),
+    );
   }
 
   /** The one and only place camera orientation is applied (all frames, all paths). */

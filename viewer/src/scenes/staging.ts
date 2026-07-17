@@ -6,6 +6,7 @@ import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh";
 import type { FreeCamera } from "@babylonjs/core/Cameras/freeCamera";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
+import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
 import { DirectionalLight } from "@babylonjs/core/Lights/directionalLight";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
@@ -38,6 +39,9 @@ const isFloor = (mesh: AbstractMesh): boolean =>
 export class StagingLayer {
   private readonly scene: Scene;
   private readonly occluder: StandardMaterial;
+  private readonly xrayMaterial: StandardMaterial;
+  private readonly proxyMeshes: AbstractMesh[] = [];
+  private xray = false;
   private assetRoot: TransformNode | null = null;
   private userPlaced = false;
 
@@ -55,6 +59,17 @@ export class StagingLayer {
     occluder.backFaceCulling = false; // room shells have inward-facing normals
     this.occluder = occluder;
 
+    // G7.1 X-ray debug material: judge proxy<->photo alignment directly over
+    // the photography (LESSONS L5). Forced depth write keeps occlusion live
+    // while X-ray is on (alpha-blended meshes skip depth writes by default).
+    const xrayMaterial = new StandardMaterial("proxy-xray", scene);
+    xrayMaterial.emissiveColor = new Color3(0.15, 0.9, 0.4);
+    xrayMaterial.disableLighting = true;
+    xrayMaterial.alpha = 0.3;
+    xrayMaterial.forceDepthWrite = true;
+    xrayMaterial.backFaceCulling = false;
+    this.xrayMaterial = xrayMaterial;
+
     // TEMPORARY stand-in lighting -- slice 7.1 only, replaced by IBL in 7.2.
     const hemi = new HemisphericLight("temp-hemi-7_1", new Vector3(0, 1, 0), scene);
     hemi.intensity = 0.9;
@@ -66,24 +81,52 @@ export class StagingLayer {
     return this.assetRoot !== null;
   }
 
+  /** Toggle the X-ray debug view on the proxy (X key). Returns the new state. */
+  toggleXray(): boolean {
+    this.xray = !this.xray;
+    const material = this.xray ? this.xrayMaterial : this.occluder;
+    for (const mesh of this.proxyMeshes) {
+      mesh.material = material;
+    }
+    return this.xray;
+  }
+
   /**
    * Load proxy GLBs (shell + details) as invisible depth-only occluders.
    * Missing files are reported, not fatal (the tour must keep working).
    * Floors stay pickable as placement targets; walls/ceilings/details only
    * occlude.
    */
-  async loadProxy(urls: string[]): Promise<{ count: number; failed: string[] }> {
+  async loadProxy(
+    urls: string[],
+  ): Promise<{ count: number; floors: number; failed: string[] }> {
     let count = 0;
+    let floors = 0;
     const failed: string[] = [];
     for (const url of urls) {
       try {
         const result = await ImportMeshAsync(url, this.scene);
+        // L1 diagnostic: settle what Babylon's RH glTF import does to __root__
+        // (identity expected in a right-handed scene; anything else means the
+        // PROXY is the transformed party, not the pano).
+        const rootNode = result.meshes.find((m) => m.name === "__root__");
+        if (rootNode) {
+          console.info(
+            `[staging] ${url} __root__ scaling=${rootNode.scaling.toString()} ` +
+              `rotationQuaternion=${rootNode.rotationQuaternion?.toString() ?? "null"} ` +
+              `position=${rootNode.position.toString()}`,
+          );
+        }
         for (const mesh of result.meshes) {
           mesh.renderingGroupId = GROUP_PROXY;
           if (mesh.getTotalVertices() > 0) {
-            mesh.material = this.occluder;
+            mesh.material = this.xray ? this.xrayMaterial : this.occluder;
             mesh.isPickable = mesh.name.includes("floor");
+            if (mesh.isPickable) {
+              floors += 1;
+            }
             mesh.freezeWorldMatrix();
+            this.proxyMeshes.push(mesh);
             count += 1;
           } else {
             mesh.isPickable = false;
@@ -93,19 +136,38 @@ export class StagingLayer {
         failed.push(url);
       }
     }
-    return { count, failed };
+    return { count, floors, failed };
   }
 
-  /** Load the Layer 3 test asset (real-scale GLB, meters; P1 normalizes later). */
+  /**
+   * Load the Layer 3 test asset (real-scale GLB, meters).
+   * Bottom-center pivot normalization (the P1 catalog convention) happens at
+   * runtime for test assets: ad-hoc GLBs usually have a CENTERED origin,
+   * which sinks them half their height into the floor when the root lands
+   * at pickedPoint. Shift the hierarchy so the bounding-box bottom sits
+   * exactly at the root origin.
+   */
   async loadAsset(url: string): Promise<void> {
     const result = await ImportMeshAsync(url, this.scene);
     const root = new TransformNode("asset-root", this.scene);
+    const pivot = new TransformNode("asset-pivot", this.scene);
+    pivot.parent = root;
     for (const mesh of result.meshes) {
       if (!mesh.parent) {
-        mesh.parent = root;
+        mesh.parent = pivot;
       }
       mesh.renderingGroupId = GROUP_ASSET;
       mesh.isPickable = false; // placement raycasts must reach the floor
+    }
+    let minY = Number.POSITIVE_INFINITY;
+    for (const mesh of result.meshes) {
+      if (mesh.getTotalVertices() > 0) {
+        mesh.computeWorldMatrix(true);
+        minY = Math.min(minY, mesh.getBoundingInfo().boundingBox.minimumWorld.y);
+      }
+    }
+    if (Number.isFinite(minY) && minY !== 0) {
+      pivot.position.y = -minY;
     }
     this.assetRoot = root;
   }

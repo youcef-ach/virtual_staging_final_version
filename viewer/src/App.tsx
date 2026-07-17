@@ -22,6 +22,8 @@ export default function App() {
   const activeSweepUuid = useViewerStore((s) => s.activeSweepUuid);
   const proxyState = useViewerStore((s) => s.proxyState);
   const assetState = useViewerStore((s) => s.assetState);
+  const xray = useViewerStore((s) => s.xray);
+  const skyboxYawDeg = useViewerStore((s) => s.skyboxYawDeg);
 
   useEffect(() => {
     const canvas = canvasRef.current;
