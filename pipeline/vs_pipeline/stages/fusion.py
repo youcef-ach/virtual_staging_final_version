@@ -904,7 +904,10 @@ def run(
             if nrm_render is not None and nrm_render.shape[0] == size:
                 if not normal_diag_printed:
                     fin = nrm_render[np.isfinite(nrm_render).all(axis=-1)]
-                    if fin.size:
+                    # Skip degenerate faces (empty outdoor renders are all
+                    # zeros) -- wait for real data before spending the
+                    # one-time print.
+                    if fin.size and float(np.abs(fin).max()) > 1e-3:
                         lens = np.linalg.norm(fin, axis=-1)
                         lens = lens[lens > 1e-6]
                         med = float(np.median(lens)) if lens.size else 0.0
@@ -913,7 +916,7 @@ def run(
                             f"min {fin.min():+.3f} max {fin.max():+.3f} "
                             f"median|n| {med:.3f}"
                         )
-                    normal_diag_printed = True
+                        normal_diag_printed = True
                 nrm_render, decoded = _decode_normals(nrm_render)
                 normals_decoded += int(decoded)
                 nrm_ext = np.ascontiguousarray(apply_orientation(nrm_render, op))
