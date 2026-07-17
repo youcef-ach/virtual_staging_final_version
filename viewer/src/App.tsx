@@ -121,6 +121,10 @@ export default function App() {
             case "P":
               viewer.toggleSkybox();
               break;
+            case "i":
+            case "I":
+              viewer.toggleRotationInverse();
+              break;
             default:
               return;
           }
