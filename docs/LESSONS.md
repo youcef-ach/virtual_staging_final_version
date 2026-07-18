@@ -160,3 +160,41 @@ the params dict, and outputs re-generate without `--force`.
 - Slice-only validation policy in force since 2026-07-15: no
   full-property batch runs until disk budget / storage optimization
   lands.
+- Pano orientation chain (LOCKED 2026-07-17, G7.1): reflection matrix =
+  pose_rt rotation filled VERBATIM into Babylon row-major storage (acts as
+  R^T = world->local on sampling directions) times SKYBOX_BASE
+  (mirrorX . rotX-90); residual yaw 0. Rotation source = E57 SCAN headers
+  (legacy 3d-viewer confirmed identical source).
+
+---
+
+## Orientation & frames (G7.1 additions, 2026-07-17)
+
+### L13. World-space corrections PRE-multiply Babylon reflection matrices
+Babylon's `A.multiply(B)` applies A THEN B to a row vector. The G7.1
+round-1 yaw harness post-multiplied `RotationY` onto the skybox base, so
+the "yaw" acted in cube space around a HORIZONTAL axis -- the pano pitched
+down instead of yawing, and a whole hypothesis round was wasted testing
+garbage.
+**Rule:** corrections meant in world space compose BEFORE the world->cube
+(or any frame) conversion; every matrix-composition site states its
+convention in a comment.
+**Fix record:** `tourViewer.applySkyboxOrientation`.
+
+### L14. Per-sweep local-frame data can pass EVERY global consistency check
+The extracted pano faces live in each sweep's LOCAL tripod frame. This
+passed F4 validation (seams, up/down, readability, continuity -- all
+satisfiable per-sweep because tripods are level), F5's GLOBAL face-mapping
+calibration (0.87-0.97 across 198 sweeps), G4 verification and G6 fusion --
+because every one of those consumers builds its cameras FROM the pose
+rotations, i.e. compares in the local frame. The viewer was the FIRST
+world-aligned consumer, and it exposed the gap instantly (G7.1): no global
+constant could align what needs a per-sweep rotation. The operator's
+memory of the legacy project (applying per-sweep E57 quaternions to the
+pano) was the decisive clue.
+**Rule:** for any per-item dataset, ask explicitly at design time: is this
+in the ITEM frame or the WORLD frame? "Validated" only means validated
+under the consumers exercised so far; schedule a world-aligned consumer
+early when one will eventually exist.
+**Fix record:** `loadTour` (pose_rt rotation join) +
+`tourViewer.applySkyboxOrientation` (R^T per sweep).
