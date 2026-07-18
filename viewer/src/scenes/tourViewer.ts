@@ -44,10 +44,11 @@ const SKYBOX_BASE: Matrix = Matrix.Scaling(-1, 1, 1).multiply(
   Matrix.RotationX(-Math.PI / 2),
 );
 const SKYBOX_YAW_CANDIDATES_DEG = [0, 90, 180, 270] as const;
-// 180 deg predicted by the legacy 3d-viewer protocol (q_sweep * q_yawLocal(180)
-// about local Z-up = RotationY(180) in the local Y-up frame) AND by the F5
-// face-mapping +-X/+-Y-swap signature. Confirm visually, then lock.
-const DEFAULT_YAW_INDEX = 2;
+// LOCKED 2026-07-17: residual yaw 0, normal rotation mode (R^T world->local).
+// Validated against the textured MatterPak reference + detail proxies + photo
+// simultaneously; legacy project confirmed to use the same scan-header
+// rotation source. Harness (O/I/[/]) kept until G7.1 closes, then stripped.
+const DEFAULT_YAW_INDEX = 0;
 
 /**
  * Layer 1 renderer: the photographic layer. The active sweep's cubemap is an
