@@ -5,6 +5,7 @@ import type { Scene } from "@babylonjs/core/scene";
 import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh";
 import type { FreeCamera } from "@babylonjs/core/Cameras/freeCamera";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
+import type { Material } from "@babylonjs/core/Materials/material";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
@@ -26,10 +27,16 @@ export const GROUP_ASSET = 2;
 const TRIPOD_HEIGHT_M = 1.4;
 const INITIAL_PLACE_DISTANCE_M = 1.8;
 
-/** X-ray debug view scope (X key cycles off -> local -> full). */
-export type XrayMode = "off" | "local" | "full";
+/** X-ray debug view scope (X key cycles off -> room -> local -> full). */
+export type XrayMode = "off" | "room" | "local" | "full";
 /** LOCAL X-ray: only meshes whose bounding box comes within this range show. */
 const LOCAL_XRAY_RADIUS_M = 5;
+
+/** Proxy sub-meshes are named "<storey>_room_<NN>/<floor|ceiling|wall_NN>". */
+const roomKeyOf = (name: string): string => {
+  const idx = name.indexOf("/");
+  return idx > 0 ? name.slice(0, idx) : name;
+};
 
 const isFloor = (mesh: AbstractMesh): boolean =>
   mesh.isPickable && mesh.name.includes("floor");
@@ -50,6 +57,9 @@ export class StagingLayer {
   private readonly detailMeshes: AbstractMesh[] = [];
   private xrayMode: XrayMode = "off";
   private detailsEnabled = true;
+  private highlightedMesh: AbstractMesh | null = null;
+  private highlightedPrev: Material | null = null;
+  private readonly xrayPicked: StandardMaterial;
   private assetRoot: TransformNode | null = null;
   private userPlaced = false;
 
@@ -87,6 +97,15 @@ export class StagingLayer {
     xrayDetail.forceDepthWrite = true;
     xrayDetail.backFaceCulling = false;
     this.xrayDetail = xrayDetail;
+    // Identify highlight (Ctrl+click): the picked proxy mesh turns MAGENTA so
+    // "that rogue wall" becomes a concrete sub-mesh name in console + HUD.
+    const xrayPicked = new StandardMaterial("proxy-xray-picked", scene);
+    xrayPicked.emissiveColor = new Color3(0.95, 0.2, 0.85);
+    xrayPicked.disableLighting = true;
+    xrayPicked.alpha = 0.5;
+    xrayPicked.forceDepthWrite = true;
+    xrayPicked.backFaceCulling = false;
+    this.xrayPicked = xrayPicked;
 
     // TEMPORARY stand-in lighting -- slice 7.1 only, replaced by IBL in 7.2.
     const hemi = new HemisphericLight("temp-hemi-7_1", new Vector3(0, 1, 0), scene);
@@ -100,14 +119,16 @@ export class StagingLayer {
   }
 
   /**
-   * Cycle the X-ray debug view (X key): off -> local -> full -> off.
-   * LOCAL shows only geometry within ~5 m of the camera (approximately the
-   * current room); everything farther keeps occluding invisibly, so runtime
-   * behavior stays honest while the view stays readable.
+   * Cycle the X-ray debug view (X key): off -> room -> local -> full -> off.
+   * ROOM shows ONLY the shell of the room under the camera (by sub-mesh
+   * name) plus nearby detail proxies -- the G3 defect-triage view: one
+   * room's planes, zero soup. LOCAL shows all geometry within ~5 m.
+   * Non-scoped meshes keep occluding invisibly, so runtime behavior stays
+   * honest while the view stays readable.
    */
   cycleXray(cameraPos: Vector3): XrayMode {
-    this.xrayMode =
-      this.xrayMode === "off" ? "local" : this.xrayMode === "local" ? "full" : "off";
+    const order: XrayMode[] = ["off", "room", "local", "full"];
+    this.xrayMode = order[(order.indexOf(this.xrayMode) + 1) % order.length];
     this.applyXray(cameraPos);
     return this.xrayMode;
   }
@@ -120,19 +141,108 @@ export class StagingLayer {
   }
 
   private applyXray(cameraPos: Vector3): void {
+    this.clearHighlight();
+    const roomKey = this.xrayMode === "room" ? this.currentRoomKey(cameraPos) : null;
+    if (this.xrayMode === "room") {
+      console.info(
+        `[staging] ROOM x-ray scope: ${roomKey ?? "no floor resolved -- radius fallback"}`,
+      );
+    }
     const near = (mesh: AbstractMesh): boolean => {
-      if (this.xrayMode === "full") return true;
       const bb = mesh.getBoundingInfo().boundingBox;
       const dx = Math.max(bb.minimumWorld.x - cameraPos.x, 0, cameraPos.x - bb.maximumWorld.x);
       const dy = Math.max(bb.minimumWorld.y - cameraPos.y, 0, cameraPos.y - bb.maximumWorld.y);
       const dz = Math.max(bb.minimumWorld.z - cameraPos.z, 0, cameraPos.z - bb.maximumWorld.z);
       return dx * dx + dy * dy + dz * dz <= LOCAL_XRAY_RADIUS_M * LOCAL_XRAY_RADIUS_M;
     };
+    const inScope = (mesh: AbstractMesh, isShell: boolean): boolean => {
+      if (this.xrayMode === "full") return true;
+      if (this.xrayMode === "room" && isShell && roomKey !== null) {
+        return roomKeyOf(mesh.name) === roomKey;
+      }
+      return near(mesh);
+    };
     for (const mesh of this.shellMeshes) {
-      mesh.material = this.xrayMode !== "off" && near(mesh) ? this.xrayShell : this.occluder;
+      mesh.material =
+        this.xrayMode !== "off" && inScope(mesh, true) ? this.xrayShell : this.occluder;
     }
     for (const mesh of this.detailMeshes) {
-      mesh.material = this.xrayMode !== "off" && near(mesh) ? this.xrayDetail : this.occluder;
+      mesh.material =
+        this.xrayMode !== "off" && inScope(mesh, false) ? this.xrayDetail : this.occluder;
+    }
+  }
+
+  /** Resolve the room key under the camera: floor below, else nearest floor. */
+  private currentRoomKey(cameraPos: Vector3): string | null {
+    const ray = new Ray(cameraPos, Vector3.Down(), 8);
+    const hit = this.scene.pickWithRay(ray, isFloor);
+    if (hit?.hit && hit.pickedMesh) {
+      return roomKeyOf(hit.pickedMesh.name);
+    }
+    // No floor directly below (stair void -- or the floor itself is MISSING,
+    // one of the defects under triage): nearest floor bbox wins; the console
+    // scope line above tells the operator which room got resolved.
+    let bestKey: string | null = null;
+    let bestD2 = Number.POSITIVE_INFINITY;
+    for (const mesh of this.shellMeshes) {
+      if (!mesh.name.includes("floor")) continue;
+      const bb = mesh.getBoundingInfo().boundingBox;
+      const dx = Math.max(bb.minimumWorld.x - cameraPos.x, 0, cameraPos.x - bb.maximumWorld.x);
+      const dy = Math.max(bb.minimumWorld.y - cameraPos.y, 0, cameraPos.y - bb.maximumWorld.y);
+      const dz = Math.max(bb.minimumWorld.z - cameraPos.z, 0, cameraPos.z - bb.maximumWorld.z);
+      const d2 = dx * dx + dy * dy + dz * dz;
+      if (d2 < bestD2) {
+        bestD2 = d2;
+        bestKey = roomKeyOf(mesh.name);
+      }
+    }
+    return bestKey;
+  }
+
+  /**
+   * Identify the proxy mesh under canvas coords (Ctrl+click): logs the exact
+   * sub-mesh name + room key + hit point + bbox, highlights it MAGENTA and
+   * returns a short HUD label. Works in ANY X-ray mode including off -- you
+   * can identify the invisible occluder that wrongly hides the asset, and
+   * clicking where a floor SHOULD be proves its absence.
+   */
+  identify(x: number, y: number): string | null {
+    const hit = this.scene.pick(
+      x,
+      y,
+      (mesh) =>
+        mesh.isEnabled() &&
+        (this.shellMeshes.includes(mesh) || this.detailMeshes.includes(mesh)),
+    );
+    if (!hit?.hit || !hit.pickedMesh || !hit.pickedPoint) {
+      console.info(
+        "[identify] no proxy mesh under cursor (proxy ABSENT here -- absence is also a finding)",
+      );
+      return "identify: no proxy here";
+    }
+    const mesh = hit.pickedMesh;
+    const kind = this.detailMeshes.includes(mesh) ? "detail" : "shell";
+    const bb = mesh.getBoundingInfo().boundingBox;
+    const size = bb.maximumWorld.subtract(bb.minimumWorld);
+    const p = hit.pickedPoint;
+    console.info(
+      `[identify] ${mesh.name} [${kind}] room=${roomKeyOf(mesh.name)} ` +
+        `hit=(${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)}) ` +
+        `dist=${hit.distance.toFixed(2)} m ` +
+        `bbox=${size.x.toFixed(2)} x ${size.y.toFixed(2)} x ${size.z.toFixed(2)} m`,
+    );
+    this.clearHighlight();
+    this.highlightedPrev = mesh.material;
+    this.highlightedMesh = mesh;
+    mesh.material = this.xrayPicked;
+    return `${mesh.name} [${kind}]`;
+  }
+
+  private clearHighlight(): void {
+    if (this.highlightedMesh) {
+      this.highlightedMesh.material = this.highlightedPrev;
+      this.highlightedMesh = null;
+      this.highlightedPrev = null;
     }
   }
 

@@ -23,6 +23,8 @@ interface ViewerState {
   /** G7.1 debug/calibration state: proxy X-ray mode (null = off) + pano yaw. */
   xray: string | null;
   skyboxYawDeg: number | null;
+  /** G7.1 identify tool (Ctrl+click): last picked proxy sub-mesh label. */
+  pickInfo: string | null;
   setBackend: (backend: EngineBackend) => void;
   setFps: (fps: number) => void;
   setStatus: (status: ViewerStatus) => void;
@@ -33,6 +35,7 @@ interface ViewerState {
   setAssetState: (message: string) => void;
   setXray: (mode: string | null) => void;
   setSkyboxYaw: (deg: number) => void;
+  setPickInfo: (info: string | null) => void;
 }
 
 export const useViewerStore = create<ViewerState>((set) => ({
@@ -46,6 +49,7 @@ export const useViewerStore = create<ViewerState>((set) => ({
   assetState: null,
   xray: null,
   skyboxYawDeg: null,
+  pickInfo: null,
   setBackend: (backend) => set({ backend }),
   setFps: (fps) => set({ fps }),
   setStatus: (status) => set({ status, errorMessage: status === "error" ? undefined : null }),
@@ -56,4 +60,5 @@ export const useViewerStore = create<ViewerState>((set) => ({
   setAssetState: (assetState) => set({ assetState }),
   setXray: (xray) => set({ xray }),
   setSkyboxYaw: (skyboxYawDeg) => set({ skyboxYawDeg }),
+  setPickInfo: (pickInfo) => set({ pickInfo }),
 }));

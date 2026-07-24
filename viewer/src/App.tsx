@@ -24,6 +24,7 @@ export default function App() {
   const assetState = useViewerStore((s) => s.assetState);
   const xray = useViewerStore((s) => s.xray);
   const skyboxYawDeg = useViewerStore((s) => s.skyboxYawDeg);
+  const pickInfo = useViewerStore((s) => s.pickInfo);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -89,6 +90,14 @@ export default function App() {
           staging.placeFromPick(event.offsetX, event.offsetY);
         };
         canvas.addEventListener("dblclick", onDblClick);
+
+        // G7.1 defect triage: Ctrl+click identifies the proxy mesh under the
+        // cursor (exact sub-mesh name -> console + HUD, magenta highlight).
+        const onIdentify = (event: PointerEvent) => {
+          if (!event.ctrlKey) return;
+          useViewerStore.getState().setPickInfo(staging.identify(event.offsetX, event.offsetY));
+        };
+        canvas.addEventListener("pointerdown", onIdentify);
 
         const onKeyDown = (event: KeyboardEvent) => {
           const step = event.shiftKey ? NUDGE_BIG_M : NUDGE_M;
@@ -176,6 +185,7 @@ export default function App() {
           window.removeEventListener("resize", onResize);
           window.removeEventListener("keydown", onKeyDown);
           canvas.removeEventListener("dblclick", onDblClick);
+          canvas.removeEventListener("pointerdown", onIdentify);
           viewer.dispose();
           engine.dispose();
           viewerRef.current = null;
@@ -218,6 +228,7 @@ export default function App() {
         {assetState && <span>{assetState}</span>}
         {skyboxYawDeg !== null && <span>pano yaw {skyboxYawDeg}\u00b0 (O)</span>}
         {xray && <span>X-RAY {xray} (X)</span>}
+        {pickInfo && <span>{pickInfo}</span>}
       </div>
 
       {status === "loading" && <div className="overlay">Loading tour\u2026</div>}
