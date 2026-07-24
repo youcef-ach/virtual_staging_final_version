@@ -585,6 +585,63 @@ def _elect(
     return best, (best_area / face.area if face.area > 0 else 0.0)
 
 
+def inject_manual_walls(
+    segments: list[WallSegment],
+    manual_walls: list[dict[str, Any]] | None,
+    storey_id: int,
+) -> list[WallSegment]:
+    """Snap operator-authored walls to real geometry and append them.
+
+    Endpoints snap to the nearest real segment endpoint within
+    MANUAL_SNAP_M, else onto the nearest wall line. Appends to
+    ``segments`` IN PLACE and returns just the added (virtual) segments.
+    Shared by build_rooms AND probe_sweeps so the probe polygonizes the
+    SAME graph production builds (LESSONS L15: the 2026-07-18 triage ran
+    a probe without closures and produced misleading void verdicts).
+    """
+    added: list[WallSegment] = []
+    if not manual_walls:
+        return added
+    real_lines = [LineString([tuple(s.p0), tuple(s.p1)]) for s in segments]
+    real_endpoints = [q for s in segments for q in (s.p0, s.p1)]
+
+    def _snap(p: np.ndarray) -> np.ndarray:
+        best: np.ndarray | None = None
+        best_d = MANUAL_SNAP_M
+        for q in real_endpoints:
+            d = float(np.hypot(q[0] - p[0], q[1] - p[1]))
+            if d < best_d:
+                best_d, best = d, np.asarray(q, dtype=np.float64)
+        if best is not None:
+            return best
+        pt = Point(float(p[0]), float(p[1]))
+        best_line = None
+        best_d = MANUAL_SNAP_M
+        for line in real_lines:
+            d = float(line.distance(pt))
+            if d < best_d:
+                best_d, best_line = d, line
+        if best_line is not None:
+            q = best_line.interpolate(best_line.project(pt))
+            return np.array([q.x, q.y], dtype=np.float64)
+        return np.asarray(p, dtype=np.float64)
+
+    for w in manual_walls:
+        if w.get("storey") is not None and int(w["storey"]) != storey_id:
+            continue
+        seg = WallSegment(
+            p0=_snap(np.asarray(w["p0"], dtype=np.float64)),
+            p1=_snap(np.asarray(w["p1"], dtype=np.float64)),
+            thickness=w.get("thickness_m"),
+            plane_ids=[],
+            weight=1.0,
+            virtual=True,
+        )
+        added.append(seg)
+        segments.append(seg)
+    return added
+
+
 def build_rooms(
     planes: list[dict[str, Any]],
     sweeps: list[tuple[int, np.ndarray]],
@@ -606,44 +663,7 @@ def build_rooms(
     for st in storeys:
         floor_patches, ceiling_patches = _storey_patches(planes, st)
         segments = merge_segments(wall_segments(storey_walls(planes, st)))
-        real_lines = [LineString([tuple(s.p0), tuple(s.p1)]) for s in segments]
-        real_endpoints = [q for s in segments for q in (s.p0, s.p1)]
-
-        def _snap(p: np.ndarray) -> np.ndarray:
-            best: np.ndarray | None = None
-            best_d = MANUAL_SNAP_M
-            for q in real_endpoints:
-                d = float(np.hypot(q[0] - p[0], q[1] - p[1]))
-                if d < best_d:
-                    best_d, best = d, np.asarray(q, dtype=np.float64)
-            if best is not None:
-                return best
-            pt = Point(float(p[0]), float(p[1]))
-            best_line = None
-            best_d = MANUAL_SNAP_M
-            for line in real_lines:
-                d = float(line.distance(pt))
-                if d < best_d:
-                    best_d, best_line = d, line
-            if best_line is not None:
-                q = best_line.interpolate(best_line.project(pt))
-                return np.array([q.x, q.y], dtype=np.float64)
-            return np.asarray(p, dtype=np.float64)
-
-        manual_segs: list[WallSegment] = []
-        for w in manual_walls or []:
-            if w.get("storey") is not None and int(w["storey"]) != st.storey_id:
-                continue
-            seg = WallSegment(
-                p0=_snap(np.asarray(w["p0"], dtype=np.float64)),
-                p1=_snap(np.asarray(w["p1"], dtype=np.float64)),
-                thickness=w.get("thickness_m"),
-                plane_ids=[],
-                weight=1.0,
-                virtual=True,
-            )
-            manual_segs.append(seg)
-            segments.append(seg)
+        manual_segs = inject_manual_walls(segments, manual_walls, st.storey_id)
         segments = close_dangling_ends(segments)
         faces = polygonize_rooms(segments)
 
@@ -1010,8 +1030,14 @@ def probe_sweeps(
     sweeps: list[tuple[int, np.ndarray]],
     indices: list[int],
     out_dir: Path,
+    manual_walls: list[dict[str, Any]] | None = None,
 ) -> None:
-    """Instrumented per-sweep diagnosis of the room graph (no heuristics)."""
+    """Instrumented per-sweep diagnosis of the room graph (no heuristics).
+
+    ``manual_walls``: pass the SAME closures.json production uses --
+    otherwise the probe polygonizes a DIFFERENT graph and its void
+    verdicts mislead (L15, 2026-07-18 incident).
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
     storeys = detect_storeys(planes, sweeps)
     pos_by_idx = {i: p for i, p in sweeps}
@@ -1050,9 +1076,11 @@ def probe_sweeps(
                 f"storey {st.storey_id}"
             )
         floor_patches, ceiling_patches = _storey_patches(planes, st)
-        segments = close_dangling_ends(
-            merge_segments(wall_segments(storey_walls(planes, st)))
-        )
+        segments = merge_segments(wall_segments(storey_walls(planes, st)))
+        manual_here = inject_manual_walls(segments, manual_walls, st.storey_id)
+        if manual_here:
+            print(f"  manual closure walls injected: {len(manual_here)}")
+        segments = close_dangling_ends(segments)
         faces = polygonize_rooms(segments)
         floor_union = unary_union([poly for _, poly in floor_patches])
         ceiling_union = unary_union(
@@ -1237,6 +1265,15 @@ def build_property(
         )
         print(f"{len(manual_walls)} manual closure wall(s) from {close_file}")
     payload, review = build_rooms(planes, sweeps, manual_walls=manual_walls)
+    # Build provenance (LESSONS L15): aggregate counts are NOT provenance --
+    # stamp the config that produced this rooms.json so freshness checks
+    # compare configs, never coincidental shell/tri counts.
+    payload["build_params"] = {
+        "planes": str(planes_path),
+        "close_file": str(close_file) if close_file is not None else None,
+        "manual_wall_count": len(manual_walls),
+        "min_pair_thickness_m": MIN_PAIR_THICKNESS_M,
+    }
 
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "rooms.json").write_text(
@@ -1296,6 +1333,13 @@ def main(argv: list[str] | None = None) -> int:
     p_probe.add_argument(
         "--sweeps", type=str, required=True, help='e.g. "58-61,175"'
     )
+    p_probe.add_argument(
+        "--close-file",
+        type=Path,
+        default=None,
+        help="closures.json -- MUST match the production build so the probe "
+        "polygonizes the same graph (L15)",
+    )
     p_probe.add_argument("--output", "-o", type=Path, default=Path("probe_out"))
     args = parser.parse_args(argv)
 
@@ -1312,7 +1356,19 @@ def main(argv: list[str] | None = None) -> int:
             (s.index, s.pose_rt[:3, 3]) for s in read_poses_json(args.poses)
         ]
         indices = parse_sweep_spec(args.sweeps, [i for i, _ in sweeps])
-        probe_sweeps(data["planes"], sweeps, indices, args.output)
+        probe_manual: list[dict[str, Any]] = []
+        if args.close_file is not None:
+            if not args.close_file.is_file():
+                parser.error(f"close file not found: {args.close_file}")
+            probe_manual = json.loads(
+                args.close_file.read_text(encoding="utf-8")
+            ).get("walls", [])
+            print(
+                f"{len(probe_manual)} manual closure wall(s) from {args.close_file}"
+            )
+        probe_sweeps(
+            data["planes"], sweeps, indices, args.output, manual_walls=probe_manual
+        )
         return 0
     if args.close_file is not None and not args.close_file.is_file():
         parser.error(f"close file not found: {args.close_file}")

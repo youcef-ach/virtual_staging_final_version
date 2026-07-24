@@ -347,6 +347,34 @@ rarely, (b) Gate-2 review volume grows on multi-property data, or
 
 ---
 
+## G7 — Runtime staging (viewer, G7.1 triage 2026-07-18)
+
+### 23. Open passages between rooms occlude staged furniture — OPEN
+Proxy walls are solid wherever no opening was cut. Three miss modes
+converge: (a) openings.py door gates miss > 1.4 m passages, wall-end
+doors, glass doors (#12); (b) manual closure walls are fully solid, but
+the kitchen/glass-room closures stand IN open space or ON glass by
+construction — furniture behind them wrongly disappears at runtime
+(glass walls should NOT occlude: the pano sees through them); (c) the
+full-property fused door/window pass has not run (#14b). Fix design
+(deferred): per-wall `occlude: false` flag in closures.json + virtual/
+manual provenance exported into proxy sub-mesh NAMES so the viewer can
+skip depth-write on see-through walls; plus fused-door cutouts for wide
+passages. Instances are collected via Ctrl+click identify during G7/G8.
+
+### 24. Thin-pair filter threshold vs real glass walls — TUNE
+`MIN_PAIR_THICKNESS_M` = 45 mm drops 13/126 pairs on this property; the
+thickness distribution has a natural gap (44.7 → 62.4 mm) supporting
+the cut, and it killed the living-room phantom (3.3 mm) by design.
+Tension: real GLASS partitions are 6–25 mm — a load-bearing glass pair
+gets dropped too (suspected factor in the kitchen 58–61 closure
+regression, under investigation). If confirmed, options: keep the drop
+and author closures (operator path, consistent with #8), or exempt
+thin pairs that coincide with ceiling-union boundaries. Re-tune on the
+50-scan set.
+
+---
+
 ## Resolved-but-instructive (for the record)
 These were fully fixed but the failure patterns are worth remembering:
 - Sum-based coverage metrics double-count under-merged duplicates — bit us

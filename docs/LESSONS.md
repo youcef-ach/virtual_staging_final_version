@@ -198,3 +198,37 @@ under the consumers exercised so far; schedule a world-aligned consumer
 early when one will eventually exist.
 **Fix record:** `loadTour` (pose_rt rotation join) +
 `tourViewer.applySkyboxOrientation` (R^T per sweep).
+
+---
+
+## Provenance & physical plausibility (G7.1 triage additions, 2026-07-18)
+
+### L15. Aggregate counts are NOT artifact provenance
+The G7.1 "freshness check" matched a rebuilt proxy against the validated
+closure-final numbers (23 shells / 810 tris) and passed -- but the
+rooms.json underneath was built WITHOUT `--close-file closures.json`:
+a different room layout coincidentally produced the same counts, and the
+entire G7.1 proxy era ran closure-less unnoticed. The kitchen "void" and
+missing floors were partly CONFIG artifacts, not geometry defects. The
+probe compounded it by polygonizing without manual walls, issuing
+misleading "true void" verdicts.
+**Rule:** artifact freshness/provenance is verified by comparing the
+BUILD CONFIG (inputs, flags, thresholds), never output aggregates.
+Stages stamp their params into their outputs; diagnostic tools consume
+the SAME config as production or their verdicts mislead.
+**Fix record:** `rooms.build_property` build_params stamp;
+`rooms probe --close-file`; `inject_manual_walls` shared by both paths.
+
+### L16. Paper-thin opposing-normal pairs are objects, not walls
+A 3.3 mm "wall pair" (wall_389+wall_629) split the living room with a
+6.9 m phantom interior wall that occluded staged furniture and captured
+floor double-clicks (occluders pick on both faces with backFaceCulling
+off). Two opposing-normal planes a few mm apart are a freestanding thin
+object seen from both sides (curtain, glass panel, divider) or a
+flipped-normal duplicate fit -- never a wall.
+**Rule:** geometric entities pass a physical-plausibility gate (walls
+have thickness >= ~50 mm) before entering structural graphs; prefer
+absolute physical invariants (see L4).
+**Fix record:** `rooms.wall_segments` MIN_PAIR_THICKNESS_M +
+`test_rooms_thin_pairs.py`; glass-wall tension tracked in
+OPEN_PROBLEMS #24.
