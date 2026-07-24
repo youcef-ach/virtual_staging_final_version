@@ -58,6 +58,12 @@ SEG_MERGE_ANGLE_DEG = 3.0
 SEG_MERGE_OFFSET_M = 0.08
 SEG_MERGE_GAP_M = 0.3
 MIN_SEGMENT_LENGTH_M = 0.3
+#: Wall pairs thinner than any physical wall are freestanding thin objects
+#: (curtains, glass panels, dividers) or duplicate fits of one surface with
+#: flipped normals -- NOT walls. Verified defect: wall_389+wall_629 (3.3 mm)
+#: split the living room with a phantom interior wall (G7.1 triage,
+#: 2026-07-18). Both planes of such a pair leave the wall graph entirely.
+MIN_PAIR_THICKNESS_M = 0.045
 #: Segment ends are extended to close corner gaps before polygonization.
 SNAP_EXTEND_M = 0.3
 #: Dangling wall ends (doorways interrupt wall inliers) are extended toward
@@ -171,9 +177,23 @@ def wall_segments(walls: list[dict[str, Any]]) -> list[WallSegment]:
         thickness = None
         mate_id = w.get("paired_with")
         if mate_id and mate_id in by_id and mate_id not in consumed:
+            pair_thickness = w.get("thickness_m")
+            if pair_thickness is not None and pair_thickness < MIN_PAIR_THICKNESS_M:
+                # Paper-thin "wall": physically impossible -- a thin
+                # freestanding object or a flipped-normal duplicate fit.
+                # Drop BOTH planes (unpairing alone would re-admit them as
+                # unpaired segments). Logged for operator audit.
+                consumed.add(pid)
+                consumed.add(mate_id)
+                print(
+                    f"[walls] dropped paper-thin pair {pid}+{mate_id} "
+                    f"th={pair_thickness * 1000:.1f} mm "
+                    f"(< {MIN_PAIR_THICKNESS_M * 1000:.0f} mm)"
+                )
+                continue
             group.append(by_id[mate_id])
             consumed.add(mate_id)
-            thickness = w.get("thickness_m")
+            thickness = pair_thickness
         consumed.add(pid)
         pts = np.vstack([_plan_points(g) for g in group])
         p0, p1 = _fit_segment(pts, np.ones(pts.shape[0]))
