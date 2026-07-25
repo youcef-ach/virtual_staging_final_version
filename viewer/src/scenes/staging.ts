@@ -405,6 +405,19 @@ export class StagingLayer {
     if (!hit?.hit || !hit.pickedPoint) return false;
     this.assetRoot.position.copyFrom(hit.pickedPoint);
     this.userPlaced = true;
+    // Grounding check: proxy floor Y is the G2-elected floor plane (LiDAR
+    // truth); tripods stand ~1.4 m above the floor they rest on, so
+    // (cameraY - 1.4) - floorY should be ~0. |delta| > ~0.05 m flags a
+    // suspect floor election (#10 thin-coverage rooms).
+    const camY = this.scene.activeCamera?.position.y;
+    const delta =
+      camY !== undefined ? camY - TRIPOD_HEIGHT_M - hit.pickedPoint.y : null;
+    console.info(
+      `[place] floor=${hit.pickedMesh?.name ?? "?"} y=${hit.pickedPoint.y.toFixed(3)}` +
+        (delta !== null
+          ? ` | grounding delta (cameraY-1.4)-floorY = ${delta.toFixed(3)} m (expect ~0 +/- 0.05)`
+          : ""),
+    );
     return true;
   }
 
@@ -428,10 +441,17 @@ export class StagingLayer {
       6,
     );
     const hit = this.scene.pickWithRay(ray, isFloor);
-    const y =
-      hit?.hit && hit.pickedPoint
-        ? hit.pickedPoint.y
-        : camera.position.y - TRIPOD_HEIGHT_M;
+    const usedFloor = !!(hit?.hit && hit.pickedPoint);
+    const y = usedFloor
+      ? hit!.pickedPoint!.y
+      : camera.position.y - TRIPOD_HEIGHT_M;
+    console.info(
+      `[place] initial ${
+        usedFloor
+          ? `floor=${hit!.pickedMesh?.name ?? "?"}`
+          : "NO FLOOR HIT -- tripod-height fallback (missing floor mesh here?)"
+      } y=${y.toFixed(3)}`,
+    );
     this.assetRoot.position.set(target.x, y, target.z);
   }
 
