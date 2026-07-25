@@ -339,6 +339,11 @@ def close_dangling_ends(
                 thickness=s.thickness,
                 plane_ids=s.plane_ids,
                 weight=s.weight,
+                # Preserve provenance: rebuilding without these reverted
+                # virtual/occlude to defaults (operator-diagnosed bug,
+                # 2026-07-18) -- the #23 occlude flags never reached proxy.
+                virtual=s.virtual,
+                occlude=s.occlude,
             )
         )
     return out
