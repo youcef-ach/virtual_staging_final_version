@@ -349,7 +349,7 @@ rarely, (b) Gate-2 review volume grows on multi-property data, or
 
 ## G7 — Runtime staging (viewer, G7.1 triage 2026-07-18)
 
-### 23. Open passages between rooms occlude staged furniture — OPEN
+### 23. Open passages between rooms occlude staged furniture — MITIGATED (occlude flag, 2026-07-18)
 Proxy walls are solid wherever no opening was cut. Three miss modes
 converge: (a) openings.py door gates miss > 1.4 m passages, wall-end
 doors, glass doors (#12); (b) manual closure walls are fully solid, but
@@ -361,6 +361,15 @@ full-property fused door/window pass has not run (#14b). Fix design
 manual provenance exported into proxy sub-mesh NAMES so the viewer can
 skip depth-write on see-through walls; plus fused-door cutouts for wide
 passages. Instances are collected via Ctrl+click identify during G7/G8.
+STATUS 2026-07-18: the occlude-flag chain SHIPPED (closures.json
+`occlude: false` → rooms.json edge provenance → proxy `wall_NN_seethru`
+naming → viewer inert material, CYAN in X-ray). Marked walls: kitchen
+east glass wall, kitchen passage divider, S2 glass-room wall; bathroom
+manual walls keep occluding (real opaque walls). STILL OPEN: fused-door
+cutouts for wide real passages missed by openings.py (#12), and
+auto-detection of glass walls that G2 DID fit (a fitted glass plane
+becomes a real occluding wall with no flag — needs G6 window/glass
+mask evidence).
 
 ### 24. Thin-pair filter threshold vs real glass walls — TUNE
 `MIN_PAIR_THICKNESS_M` = 45 mm drops 13/126 pairs on this property; the

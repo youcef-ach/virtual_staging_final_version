@@ -126,6 +126,9 @@ class WallSegment:
     plane_ids: list[str]
     weight: float
     virtual: bool = False  # sourced from ceiling outline, not wall inliers
+    #: False for see-through walls (#23): glass closure walls / open-passage
+    #: dividers exist for ROOM FORMATION only and must not occlude at runtime.
+    occlude: bool = True
 
 
 def _plan_points(plane: dict[str, Any]) -> np.ndarray:
@@ -636,6 +639,7 @@ def inject_manual_walls(
             plane_ids=[],
             weight=1.0,
             virtual=True,
+            occlude=bool(w.get("occlude", True)),
         )
         added.append(seg)
         segments.append(seg)
@@ -813,6 +817,8 @@ def build_rooms(
                         "p1": [round(float(b[0]), 4), round(float(b[1]), 4)],
                         "thickness_m": best.thickness if best else None,
                         "wall_planes": best.plane_ids if best else [],
+                        "virtual": bool(best.virtual) if best else False,
+                        "occlude": bool(best.occlude) if best else True,
                     }
                 )
             room_id = f"s{st.storey_id}_room_{len(accepted):02d}"

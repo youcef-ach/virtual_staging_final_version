@@ -55,6 +55,9 @@ export class StagingLayer {
   private readonly xrayDetail: StandardMaterial;
   private readonly shellMeshes: AbstractMesh[] = [];
   private readonly detailMeshes: AbstractMesh[] = [];
+  private readonly seethruMeshes: AbstractMesh[] = [];
+  private readonly seethruIdle: StandardMaterial;
+  private readonly xraySeethru: StandardMaterial;
   private xrayMode: XrayMode = "off";
   private detailsEnabled = true;
   private highlightedMesh: AbstractMesh | null = null;
@@ -106,6 +109,22 @@ export class StagingLayer {
     xrayPicked.forceDepthWrite = true;
     xrayPicked.backFaceCulling = false;
     this.xrayPicked = xrayPicked;
+    // See-through walls (#23): glass closure walls / open-passage dividers
+    // exist for ROOM FORMATION only -- at runtime they must not occlude
+    // (the pano sees through glass). Inert in normal mode (no color, no
+    // depth write; still Ctrl+click identifiable); CYAN in X-ray, never
+    // depth-writing so they cannot hide the asset even while debugging.
+    const seethruIdle = new StandardMaterial("proxy-seethru-idle", scene);
+    seethruIdle.disableColorWrite = true;
+    seethruIdle.disableDepthWrite = true;
+    seethruIdle.disableLighting = true;
+    this.seethruIdle = seethruIdle;
+    const xraySeethru = new StandardMaterial("proxy-xray-seethru", scene);
+    xraySeethru.emissiveColor = new Color3(0.2, 0.85, 0.95);
+    xraySeethru.disableLighting = true;
+    xraySeethru.alpha = 0.3;
+    xraySeethru.backFaceCulling = false;
+    this.xraySeethru = xraySeethru;
 
     // TEMPORARY stand-in lighting -- slice 7.1 only, replaced by IBL in 7.2.
     const hemi = new HemisphericLight("temp-hemi-7_1", new Vector3(0, 1, 0), scene);
@@ -170,6 +189,12 @@ export class StagingLayer {
       mesh.material =
         this.xrayMode !== "off" && inScope(mesh, false) ? this.xrayDetail : this.occluder;
     }
+    for (const mesh of this.seethruMeshes) {
+      mesh.material =
+        this.xrayMode !== "off" && inScope(mesh, true)
+          ? this.xraySeethru
+          : this.seethruIdle;
+    }
   }
 
   /** Resolve the room key under the camera: floor below, else nearest floor. */
@@ -212,7 +237,9 @@ export class StagingLayer {
       y,
       (mesh) =>
         mesh.isEnabled() &&
-        (this.shellMeshes.includes(mesh) || this.detailMeshes.includes(mesh)),
+        (this.shellMeshes.includes(mesh) ||
+          this.detailMeshes.includes(mesh) ||
+          this.seethruMeshes.includes(mesh)),
     );
     if (!hit?.hit || !hit.pickedMesh || !hit.pickedPoint) {
       console.info(
@@ -221,7 +248,11 @@ export class StagingLayer {
       return "identify: no proxy here";
     }
     const mesh = hit.pickedMesh;
-    const kind = this.detailMeshes.includes(mesh) ? "detail" : "shell";
+    const kind = this.detailMeshes.includes(mesh)
+      ? "detail"
+      : this.seethruMeshes.includes(mesh)
+        ? "seethru"
+        : "shell";
     const bb = mesh.getBoundingInfo().boundingBox;
     const size = bb.maximumWorld.subtract(bb.minimumWorld);
     const p = hit.pickedPoint;
@@ -346,13 +377,19 @@ export class StagingLayer {
         for (const mesh of result.meshes) {
           mesh.renderingGroupId = GROUP_PROXY;
           if (mesh.getTotalVertices() > 0) {
-            mesh.material = this.occluder; // X-ray scope re-applies on demand
+            const isSeethru = !isDetails && mesh.name.includes("seethru");
+            mesh.material = isSeethru ? this.seethruIdle : this.occluder;
             mesh.isPickable = !isDetails && mesh.name.includes("floor");
             if (mesh.isPickable) {
               floors += 1;
             }
             mesh.freezeWorldMatrix();
-            (isDetails ? this.detailMeshes : this.shellMeshes).push(mesh);
+            (isSeethru
+              ? this.seethruMeshes
+              : isDetails
+                ? this.detailMeshes
+                : this.shellMeshes
+            ).push(mesh);
             count += 1;
           } else {
             mesh.isPickable = false;

@@ -446,8 +446,22 @@ def build_property(
         merged.merge_vertices()
         tris = int(sum(len(m.faces) for m in parts.values()))
         total_tris += tris
+        seethru = 0
         for name, mesh in parts.items():
-            scene.add_geometry(mesh, geom_name=f"{room['room_id']}/{name}")
+            out_name = name
+            if name.startswith("wall_") and len(edges) == len(ring):
+                k = int(name.split("_")[1])
+                if k < len(edges) and edges[k].get("occlude", True) is False:
+                    # #23: see-through wall (glass closure / open passage) --
+                    # the viewer skips depth-write on *seethru* meshes.
+                    out_name = f"{name}_seethru"
+                    seethru += 1
+            scene.add_geometry(mesh, geom_name=f"{room['room_id']}/{out_name}")
+        if seethru:
+            print(
+                f"  {room['room_id']}: {seethru} see-through wall(s) "
+                "(occlude=false)"
+            )
         manifest_rooms.append(
             {
                 "room_id": room["room_id"],
