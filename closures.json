@@ -1,7 +1,7 @@
 {
   "walls": [
     {"storey": 1, "p0": [-25.5, -4.5], "p1": [-25.5, 1.5], "note": "kitchen east glass wall"},
-    {"storey": 1, "p0": [-27.0, 1.5], "p1": [-25.5, 1.5], "note": "kitchen south passage divider"},
+    {"storey": 1, "p0": [-28.3, 1.5], "p1": [-25.5, 1.5], "note": "kitchen south passage divider -- west end extended to the real west wall (wall_03/274/40 at x=-28.26; snap lands it on the wall line); previous x=-27.0 left a 1.26 m gap > DANGLE_MAX_EXTEND_M"},
     {"storey": 2, "p0": [-16.8, -3.0], "p1": [-16.8, 0.0], "note": "S2 east room glass wall (sweep 175)"},
     {"storey": 2, "p0": [-27.7, -4.45], "p1": [-27.7, -0.6], "note": "S2 bathroom west wall (mirror+glass room, sweeps 152-159)"},
     {"storey": 2, "p0": [-27.7, -0.6], "p1": [-24.43, -0.6], "note": "S2 bathroom north wall"},
