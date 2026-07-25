@@ -293,6 +293,9 @@ export class StagingLayer {
 
   private refRoot: TransformNode | null = null;
   private refZup = false;
+  private readonly refMeshes: AbstractMesh[] = [];
+  private readonly refMats: (Material | null)[] = [];
+  private refOccluding = false;
 
   /**
    * G7.1 ground-truth reference: the textured MatterPak mesh (OBJ exported
@@ -312,6 +315,10 @@ export class StagingLayer {
         }
         mesh.renderingGroupId = GROUP_PROXY;
         mesh.isPickable = false;
+        if (mesh.getTotalVertices() > 0) {
+          this.refMeshes.push(mesh);
+          this.refMats.push(mesh.material);
+        }
       }
       root.setEnabled(false); // B shows it
       this.refRoot = root;
@@ -334,6 +341,56 @@ export class StagingLayer {
     const next = !this.refRoot.isEnabled();
     this.refRoot.setEnabled(next);
     return next;
+  }
+
+  /**
+   * A/B occlusion experiment (G key): the textured MatterPak mesh becomes
+   * the INVISIBLE depth-only occluder while shell walls/ceilings, details
+   * and seethru meshes stand down (floors stay enabled: placement raycasts
+   * + floor occlusion). The OBJ carries the real captured geometry --
+   * worktops, open passages, stairs -- so this tests whether Decision 6
+   * should be amended to a hybrid occluder. Exiting restores everything.
+   */
+  toggleReferenceOccluder(): boolean {
+    if (!this.refRoot) {
+      console.info("[staging] no reference.glb loaded -- cannot A/B occluders");
+      return false;
+    }
+    this.refOccluding = !this.refOccluding;
+    if (this.refOccluding) {
+      this.refRoot.setEnabled(true);
+      for (const mesh of this.refMeshes) {
+        mesh.material = this.occluder;
+      }
+      for (const mesh of [...this.shellMeshes, ...this.detailMeshes]) {
+        if (!mesh.name.includes("floor")) {
+          mesh.setEnabled(false);
+        }
+      }
+      for (const mesh of this.seethruMeshes) {
+        mesh.setEnabled(false);
+      }
+      console.info(
+        "[staging] REFERENCE-OCCLUDER mode ON: MatterPak mesh depth-writes " +
+          "(invisible); shell walls/ceilings + details + seethru OFF; floors kept",
+      );
+    } else {
+      this.refRoot.setEnabled(false);
+      for (let i = 0; i < this.refMeshes.length; i += 1) {
+        this.refMeshes[i].material = this.refMats[i];
+      }
+      for (const mesh of this.shellMeshes) {
+        mesh.setEnabled(true);
+      }
+      for (const mesh of this.detailMeshes) {
+        mesh.setEnabled(this.detailsEnabled);
+      }
+      for (const mesh of this.seethruMeshes) {
+        mesh.setEnabled(true);
+      }
+      console.info("[staging] REFERENCE-OCCLUDER mode OFF: shells + details restored");
+    }
+    return this.refOccluding;
   }
 
   /** Toggle the Z-up -> Y-up conversion on the reference root (N key). */

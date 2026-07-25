@@ -154,6 +154,10 @@ export default function App() {
             case "N":
               staging.toggleReferenceFrame();
               break;
+            case "g":
+            case "G":
+              staging.toggleReferenceOccluder();
+              break;
             case "[":
               useViewerStore.getState().setSkyboxYaw(viewer.nudgeYawFine(-2));
               break;
