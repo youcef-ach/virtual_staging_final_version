@@ -1082,6 +1082,36 @@ def probe_sweeps(
             print(f"  manual closure walls injected: {len(manual_here)}")
         segments = close_dangling_ends(segments)
         faces = polygonize_rooms(segments)
+        # Gap diagnosis: after dangle extension, an endpoint touching no
+        # other segment is a TRUE open gap in the wall graph -- exactly
+        # where the polygonizer leaks and where a closure segment must
+        # land. Print every such endpoint near the probed sweep.
+        seg_lines = [LineString([tuple(s.p0), tuple(s.p1)]) for s in segments]
+        dangles: list[tuple[float, float, str]] = []
+        for i, s in enumerate(segments):
+            for p in (s.p0, s.p1):
+                q = Point(float(p[0]), float(p[1]))
+                if q.distance(pt) > 6.0:
+                    continue
+                if any(
+                    j != i and seg_lines[j].distance(q) <= DANGLE_TOUCH_TOL_M
+                    for j in range(len(seg_lines))
+                ):
+                    continue
+                label = (
+                    ",".join(s.plane_ids)
+                    if s.plane_ids
+                    else ("manual/virtual" if s.virtual else "?")
+                )
+                dangles.append((float(p[0]), float(p[1]), label))
+        if dangles:
+            print(
+                f"  dangling wall ends within 6 m ({len(dangles)}) -- open gaps:"
+            )
+            for gx, gz, label in dangles:
+                print(f"    ({gx:+.2f}, {gz:+.2f})  {label}")
+        else:
+            print("  no dangling wall ends within 6 m")
         floor_union = unary_union([poly for _, poly in floor_patches])
         ceiling_union = unary_union(
             [
