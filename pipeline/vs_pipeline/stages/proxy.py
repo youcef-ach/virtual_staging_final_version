@@ -556,7 +556,14 @@ def main(argv: list[str] | None = None) -> int:
         "--windows",
         type=Path,
         default=None,
-        help="fusion openings_fused.json (window holes; door rows ignored)",
+        help="fusion openings_fused.json (window holes)",
+    )
+    p_build.add_argument(
+        "--doors-fused",
+        type=Path,
+        default=None,
+        help="fusion openings_fused.json (door rows -> floor-reaching cutouts; "
+        "wide passages G3 misses, #23/#12; usually the same file as --windows)",
     )
     p_build.add_argument("--output", "-o", type=Path, default=Path("proxy_out"))
     args = parser.parse_args(argv)
@@ -567,11 +574,14 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"openings file not found: {args.openings}")
     if args.windows is not None and not args.windows.is_file():
         parser.error(f"windows file not found: {args.windows}")
+    if args.doors_fused is not None and not args.doors_fused.is_file():
+        parser.error(f"doors-fused file not found: {args.doors_fused}")
     build_property(
         args.rooms,
         args.output,
         openings_path=args.openings,
         windows_path=args.windows,
+        fused_doors_path=args.doors_fused,
     )
     return 0
 
