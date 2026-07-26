@@ -203,11 +203,19 @@ wall-enclosure test (floor patches < 30% inside any room). The garage
 low cover (13%/12%) — whether an open garage should receive a proxy shell
 is an unresolved product decision. No explicit exterior semantic class.
 
-### 12. Door detection limits — DEFERRED items
-`openings.py` detects floor-reaching notches only. Known gaps:
-- max width 1.4 m → double/patio doors missed (one 1.35 m detection sits
-  at the ceiling of the range — unverified whether double door or false
-  positive from glass);
+### 12. Door detection limits — DEFERRED items (passage mode SHIPPED 2026-07-26)
+`openings.py` detects floor-reaching notches. Known gaps:
+- ~~max width 1.4 m → double/patio doors missed~~ **FIXED: wide-gap
+  PASSAGE mode** — runs 1.4–3.5 m pass with the same clear/top gates plus
+  an explicit both-sides jamb requirement (wall within 0.8 m of the wall
+  bottom in the neighbor columns); emitted as kind=door + `passage: true`.
+  Motivating case: the kitchen↔living doorless passage — fused doors can
+  NEVER see it (segmentation labels the next room's content, not “door”;
+  verified zero fused rects on that wall). Residual risk: under-merged
+  duplicate planes (#1) may show the gap only on a fragment where the run
+  touches the fragment end → still rejected (wall-end ambiguity);
+- one 1.35 m detection sits at the old range ceiling — unverified whether
+  double door or false positive from glass;
 - runs touching a wall-plane end are skipped as ambiguous → doors at wall
   ends missed;
 - glass doors leave no notch at all;
