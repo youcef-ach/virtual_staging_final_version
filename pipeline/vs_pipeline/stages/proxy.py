@@ -303,6 +303,18 @@ def _room_edge_openings(
         min_w = WINDOW_MIN_WIDTH_M if kind == "window" else DOOR_MIN_WIDTH_M
         if s1 - s0 < min_w:
             continue
+        if kind == "door":
+            # A wall-sized false rect must not delete a wall (any source).
+            if s1 - s0 > DOOR_MAX_WIDTH_M:
+                continue
+            # Fused doors become floor-reaching cutouts; a partial/low rect
+            # (#21 evidence splitting) would leave a phantom LINTEL occluder
+            # -- require a walk-through top height.
+            if (
+                str(o.get("source", "")) == "fusion"
+                and y_top < floor_y + FUSED_DOOR_MIN_TOP_ABOVE_FLOOR_M
+            ):
+                continue
         y1 = min(y_top, ceiling_y - (0.05 if kind == "window" else 0.1))
         if kind == "window":
             y0 = max(y_bot, floor_y + WINDOW_SILL_MIN_M)
