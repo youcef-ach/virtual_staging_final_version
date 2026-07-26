@@ -102,7 +102,7 @@ lightweight streaming web viewer.
 - [ ] **G7. First furniture piece**
   - [x] G7.1 Depth-only proxy occlusion + placement tooling ✅ *validated 2026-07-26: placement, bottom-center pivot, grounding −0.027 m vs tripod invariant, occlusion behind real wall/counter, doorway visibility, see-through glass (#23 chain), 144 FPS; A/B verdict — shells+details beat the MatterPak export on the crisis geometry (worktop), Decision 6 CONFIRMED, hybrid killed; wide-passage cutout = content item (#23) via fusion slice extension*
   - [x] G7.2 Per-sweep IBL wiring ✅ *validated 2026-07-26: pytest 147/5, 6/6 .env exports (9 mips @ 256 px), HUD IBL ✓/✗ correct, chrome-sphere window direction correct, per-sweep asset lighting confirmed, FPS steady*
-  - [ ] G7.3 Contact shadow (`final = background × (0.35 + 0.65 × shadowVisibility)` via ShadowGenerator darkness 0.35) *(implemented 2026-07-26 — awaiting local validation)*
+  - [x] G7.3 Contact shadow (`final = background × (0.35 + 0.65 × shadowVisibility)` via ShadowGenerator darkness 0.35) ✅ *validated 2026-07-26: shadow anchors the asset; realism enhancements catalogued in #27*
 - [ ] **G8. Milestone validation** (occlusion correct; chrome-sphere window reflection; sofa grounded)
 
 ### Phase M7–9 · Tour & Staging
