@@ -4,6 +4,7 @@ import { loadTour } from "./data/loadTour";
 import { TourViewer } from "./scenes/tourViewer";
 import { StagingLayer } from "./scenes/staging";
 import { IblLighting } from "./scenes/lighting";
+import { ContactShadow } from "./scenes/shadow";
 import { useViewerStore } from "./state/store";
 
 const DATA_BASE_URL = "/data";
@@ -56,13 +57,19 @@ export default function App() {
         // G7.2: per-sweep IBL (env swap + chrome-sphere probe). Sweeps without
         // an exported .env fall back to the staging stand-in lights.
         const lighting = new IblLighting(viewer.scene);
+        // G7.3: contact shadow -- catcher follows the asset; light direction
+        // derives from the active sweep's IBL polynomial.
+        const shadow = new ContactShadow(viewer.scene);
         viewer.onSweepShown = (uuid) => {
           useViewerStore.getState().setActiveSweep(uuid);
           // LOCAL X-ray scope follows the camera across sweep jumps.
           staging.refreshXray(viewer.getCamera().position);
           void lighting
             .setForSweep(uuid, `${DATA_BASE_URL}/env/${uuid}.env`, viewer.getPanoOrientation())
-            .then((state) => useViewerStore.getState().setEnvState(state));
+            .then((state) => {
+              useViewerStore.getState().setEnvState(state);
+              shadow.updateFromEnvironment(viewer.scene.environmentTexture);
+            });
         };
         void staging
           .loadProxy([
@@ -84,6 +91,7 @@ export default function App() {
           .loadAsset(`${DATA_BASE_URL}/asset.glb`)
           .then(() => {
             staging.placeInFrontOf(viewer.getCamera());
+            shadow.attachToAsset();
             useViewerStore.getState().setAssetState("asset \u2713 dblclick floor to move");
           })
           .catch(() => {
@@ -143,6 +151,10 @@ export default function App() {
             case "c":
             case "C":
               lighting.toggleChromeSphere(viewer.getCamera());
+              break;
+            case "v":
+            case "V":
+              shadow.toggle();
               break;
             case "d":
             case "D":
