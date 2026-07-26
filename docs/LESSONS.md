@@ -36,6 +36,13 @@ spending the print. The mirror detector that motivated this was parked
 (OPEN_PROBLEMS #2); resolve the encoding question at the renderer
 before the NEXT normal consumer (relighting, re-texturing, BIM face
 orientation) is built.
+**SETTLED (2026-07-26):** the fixed diagnostic fired on a VALID face
+during the fusion slice-extension run: min −1.000 / max +1.000 /
+median|n| 1.000 → G-buffer normals are stored as SIGNED unit vectors
+(no (n+1)/2 encoding); `_decode_normals` correctly never decodes, and
+the mirror-detector park stands on PREMISE grounds (#2), not data
+grounds. Future normal consumers can trust signed semantics — with
+the usual L1 range print on first contact.
 
 ### L2. Consumers of PROXY depth must respect its intentional holes
 G3 cuts door openings into the proxy, so “lift through depth” sends door
