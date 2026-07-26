@@ -17,38 +17,30 @@ const DRAG_SENSITIVITY = 0.0025;
 const PITCH_LIMIT = Math.PI / 2 - 0.02;
 
 /**
- * Pano orientation chain (G7.1 root-cause discovery):
+ * Pano orientation chain -- LOCKED 2026-07-17 (G7.1), harness stripped
+ * 2026-07-26 after G7.1 closed (see LESSONS L13/L14 and the PLAN changelog):
  *
- * The extracted canonical faces live in each sweep's LOCAL tripod frame --
- * NOT the world frame. poses.json's pose_rt rotation maps local -> world;
- * the viewer must therefore rotate every sampled direction world -> local
- * PER SWEEP before the canonical-layout conversion. F4.4's global constant
- * could never encode that (its criteria -- seams, up/down, readability,
- * continuity -- are all satisfiable per-sweep because tripods are level);
- * F5/G4/fusion never noticed because their render cameras are built FROM
- * the pose rotations, i.e. they compare in the local frame. The viewer is
- * the first world-aligned consumer of the panos.
+ * The extracted canonical faces live in each sweep's LOCAL tripod frame.
+ * poses.json's pose_rt rotation maps local -> world; the viewer rotates every
+ * sampled direction world -> local PER SWEEP before the canonical-layout
+ * conversion. Chain (Babylon row-vector convention, v' = v * M,
+ * A.multiply(B) = A then B):
  *
- * Chain (Babylon row-vector convention, v' = v * M, A.multiply(B) = A then B):
- *   sampleDir = worldDir * R_pose (acts as R^T = world->local)
- *                        * RotationY(yawCandidate)   (residual discrete offset)
- *                        * SKYBOX_BASE               (local -> cube layout, F4.4)
+ *   sampleDir = worldDir * R_pose (verbatim fill = R^T, world->local)
+ *                        * SKYBOX_BASE (local -> cube layout, F4.4)
  *
- * The O key cycles the RESIDUAL yaw candidate (0/90/180/270): level tripods
- * mean any leftover offset between the canonical layout and the local frame
- * is a pure k*90-deg yaw on top of the F4.4 mirror parity. The I key flips
- * the rotation interpretation (transpose insurance) in case the convention
- * analysis is off by an inverse. Lock the winners and strip the harness.
+ * Residual yaw = 0 (validated against the textured MatterPak reference,
+ * the detail proxies and the photography simultaneously; rotation source =
+ * E57 SCAN headers, legacy project confirmed identical).
+ *
+ * The SAME matrix orients the per-sweep IBL environment (G7.2): the .env
+ * cubemap is built from the same stored canonical faces, and Babylon's PBR
+ * shader applies the reflection matrix to both specular sampling and the
+ * SH-polynomial irradiance normal.
  */
 const SKYBOX_BASE: Matrix = Matrix.Scaling(-1, 1, 1).multiply(
   Matrix.RotationX(-Math.PI / 2),
 );
-const SKYBOX_YAW_CANDIDATES_DEG = [0, 90, 180, 270] as const;
-// LOCKED 2026-07-17: residual yaw 0, normal rotation mode (R^T world->local).
-// Validated against the textured MatterPak reference + detail proxies + photo
-// simultaneously; legacy project confirmed to use the same scan-header
-// rotation source. Harness (O/I/[/]) kept until G7.1 closes, then stripped.
-const DEFAULT_YAW_INDEX = 0;
 
 /**
  * Layer 1 renderer: the photographic layer. The active sweep's cubemap is an
@@ -71,10 +63,7 @@ export class TourViewer {
   private activeUuid: string | null = null;
   private yaw = 0;
   private pitch = 0;
-  private yawIndex = DEFAULT_YAW_INDEX;
-  private yawFineDeg = 0;
   private currentPoseRotation: Matrix = Matrix.Identity();
-  private invertRotation = false;
   private detachControls: (() => void) | null = null;
 
   constructor(
@@ -113,43 +102,13 @@ export class TourViewer {
     return this.camera;
   }
 
-  /** Effective residual yaw (coarse candidate + fine offset), degrees. */
-  get skyboxYawDeg(): number {
-    return SKYBOX_YAW_CANDIDATES_DEG[this.yawIndex] + this.yawFineDeg;
-  }
-
-  /** Cycle the coarse residual yaw candidate (O key). Returns effective degrees. */
-  cycleSkyboxYaw(): number {
-    this.yawIndex = (this.yawIndex + 1) % SKYBOX_YAW_CANDIDATES_DEG.length;
-    this.applySkyboxOrientation(this.activeTexture);
-    return this.skyboxYawDeg;
-  }
-
   /**
-   * Fine residual yaw nudge ([ / ] keys; { / } = coarse 15-deg steps): fit the
-   * exact offset per sweep. A constant offset that repeats at every sweep is a
-   * lockable calibration; FITTED VALUES THAT DIFFER PER SWEEP mean the
-   * per-sweep rotation source is wrong (transposed interpretation, or the
-   * panos carry images2D poses that differ from the scan-header poses) and
-   * the fitted numbers themselves are the diagnosis.
+   * The locked per-sweep orientation matrix (pose world->local x SKYBOX_BASE).
+   * The IBL environment texture (G7.2) applies this SAME matrix so lighting
+   * directions match the photograph exactly like the skybox does.
    */
-  nudgeYawFine(deltaDeg: number): number {
-    this.yawFineDeg += deltaDeg;
-    this.applySkyboxOrientation(this.activeTexture);
-    return this.skyboxYawDeg;
-  }
-
-  /**
-   * Flip the pose-rotation interpretation (I key, transpose insurance).
-   * After toggling, re-cycle O -- the residual yaw winner may differ.
-   */
-  toggleRotationInverse(): boolean {
-    this.invertRotation = !this.invertRotation;
-    console.info(
-      `[tour] pose rotation interpretation: ${this.invertRotation ? "INVERTED (R, local->world)" : "normal (R^T, world->local)"} -- re-cycle O`,
-    );
-    this.applySkyboxOrientation(this.activeTexture);
-    return this.invertRotation;
+  getPanoOrientation(): Matrix {
+    return this.currentPoseRotation.multiply(SKYBOX_BASE);
   }
 
   /** Toggle the pano skybox (P key): proxy-only debug view. Returns new state. */
@@ -172,7 +131,7 @@ export class TourViewer {
     const texture = await this.loadCubeTexture(`sweep:${sweep.uuid}`, files);
     texture.coordinatesMode = Texture.SKYBOX_MODE;
     this.currentPoseRotation = TourViewer.rotationFromPose(sweep);
-    this.applySkyboxOrientation(texture);
+    texture.setReflectionTextureMatrix(this.getPanoOrientation());
 
     const previous = this.activeTexture;
     this.skyboxMaterial.reflectionTexture = texture;
@@ -215,18 +174,6 @@ export class TourViewer {
       r[1][0], r[1][1], r[1][2], 0,
       r[2][0], r[2][1], r[2][2], 0,
       0, 0, 0, 1,
-    );
-  }
-
-  /** Per-sweep pose rotation, then residual yaw candidate, then F4.4 base. */
-  private applySkyboxOrientation(texture: CubeTexture | null): void {
-    if (!texture) return;
-    const rotation = this.invertRotation
-      ? Matrix.Transpose(this.currentPoseRotation)
-      : this.currentPoseRotation;
-    const yawRad = (this.skyboxYawDeg * Math.PI) / 180;
-    texture.setReflectionTextureMatrix(
-      rotation.multiply(Matrix.RotationY(yawRad)).multiply(SKYBOX_BASE),
     );
   }
 

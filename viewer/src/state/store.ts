@@ -20,9 +20,10 @@ interface ViewerState {
   /** Layer 2/3 load summaries (G7); null until the loads settle. */
   proxyState: string | null;
   assetState: string | null;
-  /** G7.1 debug/calibration state: proxy X-ray mode (null = off) + pano yaw. */
+  /** G7.1 debug state: proxy X-ray mode (null = off). */
   xray: string | null;
-  skyboxYawDeg: number | null;
+  /** G7.2 per-sweep IBL status (env loaded vs fallback lights). */
+  envState: string | null;
   /** G7.1 identify tool (Ctrl+click): last picked proxy sub-mesh label. */
   pickInfo: string | null;
   setBackend: (backend: EngineBackend) => void;
@@ -34,7 +35,7 @@ interface ViewerState {
   setProxyState: (message: string) => void;
   setAssetState: (message: string) => void;
   setXray: (mode: string | null) => void;
-  setSkyboxYaw: (deg: number) => void;
+  setEnvState: (state: string | null) => void;
   setPickInfo: (info: string | null) => void;
 }
 
@@ -48,7 +49,7 @@ export const useViewerStore = create<ViewerState>((set) => ({
   proxyState: null,
   assetState: null,
   xray: null,
-  skyboxYawDeg: null,
+  envState: null,
   pickInfo: null,
   setBackend: (backend) => set({ backend }),
   setFps: (fps) => set({ fps }),
@@ -59,6 +60,6 @@ export const useViewerStore = create<ViewerState>((set) => ({
   setProxyState: (proxyState) => set({ proxyState }),
   setAssetState: (assetState) => set({ assetState }),
   setXray: (xray) => set({ xray }),
-  setSkyboxYaw: (skyboxYawDeg) => set({ skyboxYawDeg }),
+  setEnvState: (envState) => set({ envState }),
   setPickInfo: (pickInfo) => set({ pickInfo }),
 }));

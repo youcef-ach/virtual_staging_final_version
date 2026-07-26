@@ -3,6 +3,7 @@ import { createEngine } from "./engine/createEngine";
 import { loadTour } from "./data/loadTour";
 import { TourViewer } from "./scenes/tourViewer";
 import { StagingLayer } from "./scenes/staging";
+import { IblLighting } from "./scenes/lighting";
 import { useViewerStore } from "./state/store";
 
 const DATA_BASE_URL = "/data";
@@ -23,7 +24,7 @@ export default function App() {
   const proxyState = useViewerStore((s) => s.proxyState);
   const assetState = useViewerStore((s) => s.assetState);
   const xray = useViewerStore((s) => s.xray);
-  const skyboxYawDeg = useViewerStore((s) => s.skyboxYawDeg);
+  const envState = useViewerStore((s) => s.envState);
   const pickInfo = useViewerStore((s) => s.pickInfo);
 
   useEffect(() => {
@@ -48,15 +49,20 @@ export default function App() {
 
         const viewer = new TourViewer(engine, tour);
         viewerRef.current = viewer;
-        store.setSkyboxYaw(viewer.skyboxYawDeg);
 
         // G7: Layer 2 (proxy occluders) + Layer 3 (staged asset). Missing
         // files degrade gracefully -- the tour keeps working either way.
         const staging = new StagingLayer(viewer.scene);
+        // G7.2: per-sweep IBL (env swap + chrome-sphere probe). Sweeps without
+        // an exported .env fall back to the staging stand-in lights.
+        const lighting = new IblLighting(viewer.scene);
         viewer.onSweepShown = (uuid) => {
           useViewerStore.getState().setActiveSweep(uuid);
           // LOCAL X-ray scope follows the camera across sweep jumps.
           staging.refreshXray(viewer.getCamera().position);
+          void lighting
+            .setForSweep(uuid, `${DATA_BASE_URL}/env/${uuid}.env`, viewer.getPanoOrientation())
+            .then((state) => useViewerStore.getState().setEnvState(state));
         };
         void staging
           .loadProxy([
@@ -130,17 +136,13 @@ export default function App() {
               useViewerStore.getState().setXray(mode === "off" ? null : mode);
               break;
             }
-            case "o":
-            case "O":
-              useViewerStore.getState().setSkyboxYaw(viewer.cycleSkyboxYaw());
-              break;
             case "p":
             case "P":
               viewer.toggleSkybox();
               break;
-            case "i":
-            case "I":
-              viewer.toggleRotationInverse();
+            case "c":
+            case "C":
+              lighting.toggleChromeSphere(viewer.getCamera());
               break;
             case "d":
             case "D":
@@ -157,18 +159,6 @@ export default function App() {
             case "g":
             case "G":
               staging.toggleReferenceOccluder();
-              break;
-            case "[":
-              useViewerStore.getState().setSkyboxYaw(viewer.nudgeYawFine(-2));
-              break;
-            case "{":
-              useViewerStore.getState().setSkyboxYaw(viewer.nudgeYawFine(-15));
-              break;
-            case "]":
-              useViewerStore.getState().setSkyboxYaw(viewer.nudgeYawFine(2));
-              break;
-            case "}":
-              useViewerStore.getState().setSkyboxYaw(viewer.nudgeYawFine(15));
               break;
             default:
               return;
@@ -230,7 +220,7 @@ export default function App() {
         {activeIndex !== undefined && <span>sweep #{String(activeIndex).padStart(3, "0")}</span>}
         {proxyState && <span>{proxyState}</span>}
         {assetState && <span>{assetState}</span>}
-        {skyboxYawDeg !== null && <span>pano yaw {skyboxYawDeg}\u00b0 (O)</span>}
+        {envState && <span>{envState} (C)</span>}
         {xray && <span>X-RAY {xray} (X)</span>}
         {pickInfo && <span>{pickInfo}</span>}
       </div>
