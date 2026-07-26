@@ -101,8 +101,8 @@ lightweight streaming web viewer.
 - [x] **G6. Semantic segmentation pipeline + Gate 2 tooling** ✅ *validated 2026-07-17 (143 tests): slices 1–4 — Swin-T + upright fix, SAM ViT-B refinement, dual-direction 2D↔3D fusion (windows reprojection-proven, 22 furniture boxes; mirror detector parked → #2), consumer wiring (proxy window cutouts, Gate-1 exclusion 47→41 flags, guided highlight reconstruction ×4.94); click-fix editor DEFERRED by decision → operator override `{face}_cls_override.png` (#22)* (Stage 4: Mask2Former ADE20K + SAM refinement + 2D-3D fusion; classes: floor, wall_NN, ceiling, window, door, furniture, other; masks + 3D furniture boxes stored for Year-2 inpainting — zero schema rework)
 - [ ] **G7. First furniture piece**
   - [x] G7.1 Depth-only proxy occlusion + placement tooling ✅ *validated 2026-07-26: placement, bottom-center pivot, grounding −0.027 m vs tripod invariant, occlusion behind real wall/counter, doorway visibility, see-through glass (#23 chain), 144 FPS; A/B verdict — shells+details beat the MatterPak export on the crisis geometry (worktop), Decision 6 CONFIRMED, hybrid killed; wide-passage cutout = content item (#23) via fusion slice extension*
-  - [ ] G7.2 Per-sweep IBL wiring *(implemented 2026-07-26: .env exporter + environment swap + chrome-sphere toggle — awaiting local validation)*
-  - [ ] G7.3 Contact shadow (shadow-catcher WGSL: `final = background × (0.35 + 0.65 × shadowVisibility)`)
+  - [x] G7.2 Per-sweep IBL wiring ✅ *validated 2026-07-26: pytest 147/5, 6/6 .env exports (9 mips @ 256 px), HUD IBL ✓/✗ correct, chrome-sphere window direction correct, per-sweep asset lighting confirmed, FPS steady*
+  - [ ] G7.3 Contact shadow (`final = background × (0.35 + 0.65 × shadowVisibility)` via ShadowGenerator darkness 0.35) *(implemented 2026-07-26 — awaiting local validation)*
 - [ ] **G8. Milestone validation** (occlusion correct; chrome-sphere window reflection; sofa grounded)
 
 ### Phase M7–9 · Tour & Staging
