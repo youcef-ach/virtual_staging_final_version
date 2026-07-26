@@ -1,4 +1,4 @@
-"""Stage 6 (G3) slice 3 -- door opening detection from wall boundaries.
+"""Stage 6 (G3) slice 3 -- door + passage opening detection from wall boundaries.
 
 Doors reach the floor, so they notch the EXTERNAL contour that G2 stores as
 ``boundary_2d``: a jamb-bounded run of grid columns whose lowest wall inlier
@@ -7,8 +7,20 @@ Detected rects are emitted per wall plane in the plane's (u, v) frame plus
 world-space corners; the proxy stage cuts them from wall faces (runtime
 occlusion must not block the view through doorways).
 
+WIDE-GAP PASSAGE MODE (#12/#23/#26, added 2026-07-26): doorless open
+passages (e.g. the kitchen<->living entrance) carry NO door-class pixels --
+segmentation sees the next room's content through them, so the fused-door
+path can never detect them (verified on the property: zero fused rects on
+the z~0.4 passage wall). The evidence that DOES exist is geometric: the
+passage is a floor-reaching occupancy gap in the wall's own boundary, wider
+than a door. Runs 1.4-3.5 m wide pass with the same clear/top gates plus an
+EXPLICIT jamb requirement (both neighbor columns must hold wall reaching
+within 0.8 m of the wall bottom); they emit as kind=door with
+``"passage": true`` so downstream consumption (proxy floor-reaching
+cutouts) is unchanged.
+
 Windows are interior holes -- invisible to the external contour -- and land
-later with a G2 boundary upgrade (RETR_CCOMP) and/or G6 window masks.
+via G6 fusion masks (see fusion.py / proxy --windows).
 
 CLI:
     python -m vs_pipeline.stages.openings detect \
@@ -38,10 +50,19 @@ DOOR_MAX_WIDTH_M = 1.4
 #: above the wall bottom (standard doors clear ~2.0 m).
 DOOR_MIN_CLEAR_M = 1.6
 DOOR_TOP_MAX_M = 2.6
+#: Wide-gap passage mode: doorless openings up to this width qualify when
+#: BOTH neighbor columns are real jambs (wall reaching near the bottom).
+PASSAGE_MAX_WIDTH_M = 3.5
+PASSAGE_JAMB_MAX_CLEAR_M = 0.8
 
 
 def _opening_dict(
-    plane: dict[str, Any], ua: float, ub: float, vb: float, vt: float
+    plane: dict[str, Any],
+    ua: float,
+    ub: float,
+    vb: float,
+    vt: float,
+    passage: bool = False,
 ) -> dict[str, Any]:
     frame = plane["frame"]
     origin = np.asarray(frame["origin"], dtype=np.float64)
@@ -51,7 +72,7 @@ def _opening_dict(
         origin + u_axis * u + v_axis * v
         for u, v in ((ua, vb), (ub, vb), (ub, vt), (ua, vt))
     ]
-    return {
+    out = {
         "plane_id": plane["plane_id"],
         "kind": "door",
         "u_range": [round(ua, 4), round(ub, 4)],
@@ -60,10 +81,13 @@ def _opening_dict(
         "height_m": round(float(vt - vb), 3),
         "corners_3d": [[round(float(c), 4) for c in p] for p in corners],
     }
+    if passage:
+        out["passage"] = True
+    return out
 
 
 def detect_wall_openings(plane: dict[str, Any]) -> list[dict[str, Any]]:
-    """Door rects for one wall plane from its boundary_2d notches."""
+    """Door/passage rects for one wall plane from its boundary_2d notches."""
     frame = plane.get("frame")
     b2 = plane.get("boundary_2d") or []
     if not frame or len(b2) < 4:
@@ -90,6 +114,12 @@ def detect_wall_openings(plane: dict[str, Any]) -> list[dict[str, Any]]:
             lowest[i] = float(vs[idx[0]] - v0)
     door_col = np.isfinite(lowest) & (lowest >= DOOR_MIN_CLEAR_M)
 
+    def _is_jamb(col: int) -> bool:
+        """Real jamb: wall in this column reaches near the wall bottom."""
+        return bool(
+            np.isfinite(lowest[col]) and lowest[col] <= PASSAGE_JAMB_MAX_CLEAR_M
+        )
+
     openings: list[dict[str, Any]] = []
     i = 0
     while i < nu:
@@ -103,16 +133,33 @@ def detect_wall_openings(plane: dict[str, Any]) -> list[dict[str, Any]]:
         if i > 0 and j < nu - 1:
             width = (j - i + 1) * GRID_M
             top = float(lowest[i : j + 1].min())
-            if DOOR_MIN_WIDTH_M <= width <= DOOR_MAX_WIDTH_M and top <= DOOR_TOP_MAX_M:
-                openings.append(
-                    _opening_dict(
-                        plane,
-                        float(us[i] - GRID_M / 2),
-                        float(us[j] + GRID_M / 2),
-                        float(v0),
-                        float(v0 + top),
+            if top <= DOOR_TOP_MAX_M:
+                if DOOR_MIN_WIDTH_M <= width <= DOOR_MAX_WIDTH_M:
+                    openings.append(
+                        _opening_dict(
+                            plane,
+                            float(us[i] - GRID_M / 2),
+                            float(us[j] + GRID_M / 2),
+                            float(v0),
+                            float(v0 + top),
+                        )
                     )
-                )
+                elif DOOR_MAX_WIDTH_M < width <= PASSAGE_MAX_WIDTH_M and _is_jamb(
+                    i - 1
+                ) and _is_jamb(j + 1):
+                    # Wide doorless passage: at this width 'not touching the
+                    # wall end' alone is too weak -- demand REAL jambs on
+                    # both sides (wall reaching near the bottom).
+                    openings.append(
+                        _opening_dict(
+                            plane,
+                            float(us[i] - GRID_M / 2),
+                            float(us[j] + GRID_M / 2),
+                            float(v0),
+                            float(v0 + top),
+                            passage=True,
+                        )
+                    )
         i = j + 1
     return openings
 
@@ -134,23 +181,32 @@ def detect_property(planes_path: Path, output_path: Path) -> dict[str, Any]:
     }
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    passages = [o for o in openings if o.get("passage")]
     if openings:
         widths = [o["width_m"] for o in openings]
         heights = [o["height_m"] for o in openings]
         print(
-            f"{len(openings)} door opening(s) across {walls} wall plane(s)  "
+            f"{len(openings)} opening(s) across {walls} wall plane(s) -- "
+            f"{len(openings) - len(passages)} door(s), "
+            f"{len(passages)} wide passage(s)  "
             f"(width {min(widths):.2f}-{max(widths):.2f} m, "
             f"height {min(heights):.2f}-{max(heights):.2f} m)"
         )
+        for o in passages:
+            c = np.asarray(o["corners_3d"], dtype=np.float64).mean(axis=0)
+            print(
+                f"  passage on {o['plane_id']}: {o['width_m']:.2f} x "
+                f"{o['height_m']:.2f} m at ({c[0]:.2f}, {c[1]:.2f}, {c[2]:.2f})"
+            )
     else:
-        print(f"no door openings detected across {walls} wall plane(s)")
+        print(f"no openings detected across {walls} wall plane(s)")
     print(f"output -> {output_path}")
     return payload
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Stage 6 (G3) slice 3: door opening detection."
+        description="Stage 6 (G3) slice 3: door + passage opening detection."
     )
     sub = parser.add_subparsers(dest="command", required=True)
     p_detect = sub.add_parser("detect", help="structural_planes.json -> openings.json")
