@@ -54,6 +54,13 @@ PARALLEL_EPS = 1e-3
 DOOR_MIN_WIDTH_M = 0.4
 WINDOW_MIN_WIDTH_M = 0.25
 OPENING_MIN_HEIGHT_M = 0.2
+#: No door/passage rect may exceed this width (a wall-sized false rect
+#: must not delete a wall; real double/patio doors + open passages fit).
+DOOR_MAX_WIDTH_M = 4.0
+#: Fused doors (--doors-fused) must reach this far above the room floor:
+#: partial/low rects (#21 evidence splitting) are rejected -- a half-height
+#: cutout would trade a phantom wall for a phantom lintel.
+FUSED_DOOR_MIN_TOP_ABOVE_FLOOR_M = 1.5
 #: Windows keep a minimal sill above the floor (floor-reaching 'windows'
 #: are glass doors; a 2 cm sill is harmless for occlusion).
 WINDOW_SILL_MIN_M = 0.02
