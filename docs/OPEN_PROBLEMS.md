@@ -434,6 +434,25 @@ is NOT the fix path. Pre-publish visual QA (Risk #3 guardrail) is the
 product-level safety net; G8 judges occlusion on the interior trio
 where fusion coverage is complete.
 
+**FIX DESIGN — Gate 3, automated occlusion QA (operator question
+2026-07-26: “will we keep manually identifying defects?” — NO).**
+Manual per-sweep inspection does not scale and was never the plan;
+Gate 1 is the precedent (198 sweeps → automated scoring → review only
+the flags). Gate 3 consumes artifacts we already bake per sweep
+(proxy-depth/normal G-buffers, segmentation masks, panos, the locked F5
+calibration + scoring machinery) and emits a ranked review queue:
+(a) **phantom-occluder check** — project every proxy wall into every
+face that sees it; photo segmentation showing coherent NON-wall content
+(floor/furniture/room-behind) along the wall's pixels at close proxy
+range ⇒ flag (catches solid walls over open passages, false fused-door
+victims, manual-closure walls crossing space);
+(b) **missing-opening check** — photo door/window masks vs proxy holes
+on the same wall plane; masked opening with no hole (or hole with no
+mask) ⇒ flag. Both are per-sweep, resumable, and reuse fusion's
+alignment core. BLOCKED ON: full-property segmentation + G-buffer runs
+(#14b disk policy) → lands with P3 workers / storage optimization;
+build trigger re-affirmed as F7.2 triage cost.
+
 ### 27. Contact-shadow realism — TUNE (enhancement wishlist, logged 2026-07-26)
 G7.3 validated: the shadow anchors the asset. Operator note: could look
 more realistic. Candidates, in rough value order, all judged AFTER the
