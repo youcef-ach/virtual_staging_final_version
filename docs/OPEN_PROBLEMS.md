@@ -382,6 +382,26 @@ and author closures (operator path, consistent with #8), or exempt
 thin pairs that coincide with ceiling-union boundaries. Re-tune on the
 50-scan set.
 
+### 25. G7.2 .env specular chain approximations — TUNE (judged at G8)
+`ibl_export.py` writes Babylon v2 `.env` files from the G5 chain. Two
+known approximations, both gated at the G8 chrome-sphere/grounded-sofa
+review:
+- **Roughness→LOD schedule mismatch:** G5 prefilters 5 mips at LINEAR
+  roughness m/4 (256→16); Babylon's PBR shader picks the mip from
+  alphaG via its `lodGenerationScale = 0.8` mapping, which assumes the
+  engine's own prefilter distribution. Roughness-0 (chrome) is exact
+  (mip 0 = mirror env) but MID-roughness reflections may read slightly
+  too sharp/blurry. Fix paths: compute Babylon's per-mip target
+  roughness (invert the shader `getLodFromAlphaG` mapping) and bake the
+  G5 chain on THAT schedule with 9 levels, or resample between G5
+  roughness levels at export time.
+- **Tail mips (8,4,2,1) are area-downsampled** from the roughness-1.0
+  mip rather than GGX-prefiltered (the .env format requires the chain
+  to reach 1×1). Near-uniform by then; verify no visible artifact on
+  high-roughness materials.
+Also inherited: the 512² specular-base upgrade knob from G5 remains
+available (idempotent re-bake) if the chrome sphere wants more detail.
+
 ---
 
 ## Resolved-but-instructive (for the record)

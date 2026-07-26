@@ -139,6 +139,28 @@ Cache-skip logic must compare the COMPLETE params identity (the G6
 infer/refine). New stages copy that pattern: any semantic change bumps
 the params dict, and outputs re-generate without `--force`.
 
+### L17. Third-party format/API facts: verify at the SHIPPED source, never from search results
+The G7.2 `.env` research (web search summary) contradicted the installed
+Babylon source on FOUR load-bearing points: the magic bytes (claimed an
+ASCII header string; reality is 8 binary bytes), the manifest schema
+(claimed `{lod,face,offset,size}`; reality is `{length,position}`
+mip-major), the RGBD math (claimed shared-exponent `2^(8(A-1))`, i.e.
+RGBE; reality is `D = floor(255/max)/255` premultiply), and gamma
+(claimed linear-in-PNG; reality is gamma-encoded rgb, decoded
+`pow(rgb,2.2)/a`). Building on the research would have produced files
+that fail Babylon's header check on byte 0 — or, worse, load with
+uniformly wrong lighting. `viewer/node_modules` IS the ground truth for
+the exact installed engine version; four pasted snippets locked the
+format in one round.
+**Rule:** any format or API consumed across a language boundary gets its
+facts from the shipped source of the EXACT installed version, plus a
+parser/round-trip test in our codebase (`ibl_export.read_env`). Search
+results and LLM summaries are hypothesis generators, never format specs.
+Corollary (same family as L1): a plausible, detailed, confident spec is
+still unvalidated value semantics.
+**Fix record:** `ibl_export.py` (docstring carries the verified facts +
+source pointers); `test_ibl_export.py` round-trip tests.
+
 ---
 
 ## Property-specific facts worth remembering (this test property)
