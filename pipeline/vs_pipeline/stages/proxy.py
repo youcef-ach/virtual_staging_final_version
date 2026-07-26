@@ -378,6 +378,7 @@ def build_property(
     out_dir: Path,
     openings_path: Path | None = None,
     windows_path: Path | None = None,
+    fused_doors_path: Path | None = None,
 ) -> dict[str, Any]:
     import trimesh
 
@@ -387,15 +388,26 @@ def build_property(
         odata = json.loads(openings_path.read_text(encoding="utf-8"))
         for o in odata.get("openings", []):
             openings_by_plane.setdefault(o["plane_id"], []).append(o)
+    # Geometric-assignment candidates (no plane-id prefilter, LESSONS L3):
+    # fused windows AND -- when requested -- fused doors share this path.
     window_openings: list[dict[str, Any]] = []
     if windows_path is not None:
         wdata = json.loads(windows_path.read_text(encoding="utf-8"))
         window_openings = [
             o for o in wdata.get("openings", []) if o.get("kind") == "window"
         ]
+        print(f"{len(window_openings)} fused window opening(s) loaded")
+    if fused_doors_path is not None:
+        ddata = json.loads(fused_doors_path.read_text(encoding="utf-8"))
+        fused_doors = [
+            o for o in ddata.get("openings", []) if o.get("kind") == "door"
+        ]
+        window_openings.extend(fused_doors)
         print(
-            f"{len(window_openings)} fused window opening(s) loaded "
-            f"(doors in that file are ignored: G3 is the door source)"
+            f"{len(fused_doors)} fused door opening(s) loaded (wide-passage "
+            f"cutouts #23/#12; gates: width <= {DOOR_MAX_WIDTH_M} m, top >= "
+            f"{FUSED_DOOR_MIN_TOP_ABOVE_FLOOR_M} m above floor; overlapping "
+            f"G3 rects dedup on merge)"
         )
     if data.get("schema_version", 1) < 2:
         raise SystemExit(
