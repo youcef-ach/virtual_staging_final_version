@@ -402,6 +402,51 @@ review:
 Also inherited: the 512² specular-base upgrade knob from G5 remains
 available (idempotent re-bake) if the chrome sphere wants more detail.
 
+### 26. Runtime occlusion fidelity ceiling — OPEN (consolidated, logged 2026-07-26)
+Operator report after the fused-door rebuild: SOME walls do not occlude
+and SOME openings still occlude. This is the umbrella entry; instances
+split into known classes (triage each with Ctrl+click identify before
+assuming a new defect):
+- **Openings that occlude (holes missing):** (a) fusion coverage is
+  SLICE-ONLY — opening evidence exists only where the 9 fused sweeps
+  (1/50/56/57/60/66/152/157/175) saw; everywhere else no cutout exists
+  by construction until the full-property segmentation + G-buffer +
+  fusion runs land (#14b disk policy); (b) partial/low fused rects
+  rejected by the 1.5 m floor-reach gate (#21 evidence splitting);
+  (c) G3 jamb-detection miss modes (#12: >1.4 m, wall-end, glass doors).
+- **Walls that don't occlude (holes/gaps wrong):** (a) seethru walls are
+  INTENTIONAL (#23 — identify says [seethru]); (b) fused rects register
+  on duplicate coplanar planes (#1) and can land slightly off the true
+  wall or split (#21); (c) glass walls G2 never fitted (#2) + dropped
+  thin pairs (#24); (d) NEW SUSPECT: false fused-door rects cutting
+  real walls — 29 fused doors from 9 sweeps includes unmatched rects;
+  width/floor-reach gates mitigate but do not eliminate. Instances
+  where identify names a wall WITH a hole that the photo shows solid
+  belong here — collect them.
+- **Also relevant:** detail-box camera-enclosure hazard (#14b, sweep 50).
+Decision rule (locked at G7.1 triage round 6): keep converting defects
+into automatic gates while the rate is low; if the 50-scan set (F7.2)
+shows hours of triage per property, evaluate the catalogued research
+replacements (#8 RoomFormer/Floor-SP/HEAT, #1 region-growing G2, #19
+better mesh sources). The A/B verdict stands: shells+details beat the
+MatterPak export on fine occlusion (scan holes lose); a hybrid occluder
+is NOT the fix path. Pre-publish visual QA (Risk #3 guardrail) is the
+product-level safety net; G8 judges occlusion on the interior trio
+where fusion coverage is complete.
+
+### 27. Contact-shadow realism — TUNE (enhancement wishlist, logged 2026-07-26)
+G7.3 validated: the shadow anchors the asset. Operator note: could look
+more realistic. Candidates, in rough value order, all judged AFTER the
+G8 gate: (a) contact-hardening / PCSS (sharp at contact, softer with
+caster height) instead of uniform blur-exponential; (b) an
+ambient-occlusion blob multiplied under the asset footprint (cheap,
+helps even where the directional term is weak); (c) per-sweep shadow
+DARKNESS scaled by the IBL irradiance ratio (bright rooms = softer
+shadows); (d) penumbra from the window SOLID ANGLE (windows are area
+lights, not points); (e) several weighted shadow lobes from the top SH
+directions instead of one dominant direction. Formula floor (0.35)
+stays the locked plan constant unless G8 says otherwise.
+
 ---
 
 ## Resolved-but-instructive (for the record)
