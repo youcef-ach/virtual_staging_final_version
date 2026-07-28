@@ -31,6 +31,39 @@ npm run build      # production build
 The HUD (top-left) shows the active render backend — **WEBGPU** on supported browsers
 (Chrome/Edge ≥ 113, recent Firefox), **WEBGL2** otherwise. Verify both paths when possible.
 
+### 6. Model Output Inspection
+
+Test scripts often generate debug renders or segmentation overlays into directories like `tests/debug_out`. These are invaluable for diagnosing algorithm failures without running the full viewer.
+
+
+## 7. Deployment & Scaling
+
+The pipeline orchestrator uses a local subprocess executor for development. For production deployment, you'll need:
+
+### Infrastructure
+- **API/Dashboard:** Docker container running Uvicorn behind Nginx/ALB.
+- **Database:** PostgreSQL 16+.
+- **Pipeline Workers:** Celery workers backed by Redis, running on GPU-enabled instances (e.g. AWS g5.xlarge or Kubernetes pods with NVIDIA L4/A10G).
+- **Storage:** S3 bucket for published artifacts (GLB, KTX2, JSON).
+
+### CDN Setup
+Set `VS_S3_BUCKET`, `VS_CDN_URL`, and `VS_AWS_PROFILE` in your `.env`. 
+The `compress.py` stage (Stage 10) will automatically upload the proxy meshes and manifests to S3. Configure CloudFront (or equivalent CDN) to serve this bucket with aggressive caching (`Cache-Control: max-age=31536000`) for the GLB files.
+
+### Monitoring
+Start the monitoring stack using `docker-compose -f docker-compose.monitoring.yml up -d`.
+- **Prometheus:** `localhost:9090`
+- **Grafana:** `localhost:3000` (admin/admin). Import the pipeline metrics dashboard to track DAG completion times and failure rates.
+- **Locust (Load Testing):** Run `cd backend && locust -f tests/load_test.py` to simulate dashboard polling.
+
+## 8. Cross-Device QA Checklist
+
+Before releasing major viewer updates, verify on these targets:
+- [ ] **Desktop Chrome (Windows/macOS):** Baseline. WebGPU should be active.
+- [ ] **Desktop Safari (macOS):** WebGL2 fallback. Check for texture caching bugs.
+- [ ] **iOS Safari (iPhone 13+):** Strict VRAM limits. Verify that rapid sweep jumps don't crash the tab.
+- [ ] **Android Chrome (Pixel 6+):** Verify pointer events (touch + drag) for the staging editor.
+
 ### Tour data
 
 The viewer reads pipeline outputs from `viewer/public/data/` (git-ignored):

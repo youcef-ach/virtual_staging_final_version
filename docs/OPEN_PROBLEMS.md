@@ -441,6 +441,11 @@ MatterPak export on fine occlusion (scan holes lose); a hybrid occluder
 is NOT the fix path. Pre-publish visual QA (Risk #3 guardrail) is the
 product-level safety net; G8 judges occlusion on the interior trio
 where fusion coverage is complete.
+**G8 OPERATOR VERDICT (2026-07-26):** after the passage rebuild (54
+doors + 3 wide passages, s1_room_01 → 12 openings) the issue is
+CONFIRMED STILL PRESENT but ACCEPTED as a known limitation gated by
+the full-property segmentation + G-buffer run (#14b disk policy) and
+the Gate 3 design below. The operator confirmed: proceed with the plan.
 
 **FIX DESIGN — Gate 3, automated occlusion QA (operator question
 2026-07-26: “will we keep manually identifying defects?” — NO).**
@@ -450,29 +455,58 @@ the flags). Gate 3 consumes artifacts we already bake per sweep
 (proxy-depth/normal G-buffers, segmentation masks, panos, the locked F5
 calibration + scoring machinery) and emits a ranked review queue:
 (a) **phantom-occluder check** — project every proxy wall into every
-face that sees it; photo segmentation showing coherent NON-wall content
-(floor/furniture/room-behind) along the wall's pixels at close proxy
-range ⇒ flag (catches solid walls over open passages, false fused-door
-victims, manual-closure walls crossing space);
+  face that sees it; photo segmentation showing coherent NON-wall content
+  (floor/furniture/room-behind) along the wall's pixels at close proxy
+  range ⇒ flag (catches solid walls over open passages, false fused-door
+  victims, manual-closure walls crossing space);
 (b) **missing-opening check** — photo door/window masks vs proxy holes
-on the same wall plane; masked opening with no hole (or hole with no
-mask) ⇒ flag. Both are per-sweep, resumable, and reuse fusion's
-alignment core. BLOCKED ON: full-property segmentation + G-buffer runs
-(#14b disk policy) → lands with P3 workers / storage optimization;
-build trigger re-affirmed as F7.2 triage cost.
+  on the same wall plane; masked opening with no hole (or hole with no
+  mask) ⇒ flag. Both are per-sweep, resumable, and reuse fusion's
+  alignment core. BLOCKED ON: full-property segmentation + G-buffer runs
+  (#14b disk policy) → lands with P3 workers / storage optimization;
+  build trigger re-affirmed as F7.2 triage cost.
 
-### 27. Contact-shadow realism — TUNE (enhancement wishlist, logged 2026-07-26)
-G7.3 validated: the shadow anchors the asset. Operator note: could look
-more realistic. Candidates, in rough value order, all judged AFTER the
-G8 gate: (a) contact-hardening / PCSS (sharp at contact, softer with
-caster height) instead of uniform blur-exponential; (b) an
-ambient-occlusion blob multiplied under the asset footprint (cheap,
-helps even where the directional term is weak); (c) per-sweep shadow
-DARKNESS scaled by the IBL irradiance ratio (bright rooms = softer
-shadows); (d) penumbra from the window SOLID ANGLE (windows are area
-lights, not points); (e) several weighted shadow lobes from the top SH
-directions instead of one dominant direction. Formula floor (0.35)
-stays the locked plan constant unless G8 says otherwise.
+### 27. Contact-shadow realism + direction mismatch — OPEN (logged 2026-07-26)
+G7.3 validated: the shadow anchors the asset. Operator notes:
+- Could look more realistic (softness, darkness).
+- **Shadow direction does NOT match the real light direction** visible
+  in the photograph. Existing real shadows in the pano fall in one
+  direction; the synthetic contact shadow falls in another. Root cause:
+  the SH polynomial's linear-band dominant direction (shadow.ts
+  `updateFromEnvironment`) approximates the overall brightest
+  hemisphere, but real indoor lighting is multi-lobe (multiple windows,
+  ceiling lights, reflected fill) — a single SH-dominant vector can
+  point at the BRIGHTEST light (e.g. a ceiling fixture) instead of the
+  light that CAST the visible floor shadow (a side window). Also, the
+  `MIN_DOWN_COMPONENT` clamp forces the shadow downward, distorting
+  shallow-angle window light.
+Candidates, in rough value order:
+(a) **multi-lobe shadow** — extract the top 2–3 SH peaks and cast a
+  weighted shadow from each (captures the dominant window AND the fill);
+(b) contact-hardening / PCSS (sharp at contact, softer with caster
+  height) instead of uniform blur-exponential;
+(c) an ambient-occlusion blob multiplied under the asset footprint
+  (cheap, helps even where the directional term is weak);
+(d) per-sweep shadow DARKNESS scaled by the IBL irradiance ratio
+  (bright rooms = softer shadows);
+(e) penumbra from the window SOLID ANGLE (windows are area lights, not
+  points);
+(f) match the REAL shadow direction in the photo — sample the pano
+  directly for the dominant floor-shadow orientation (gradient analysis
+  on the floor mask) and use that instead of SH dominant direction.
+Formula floor (0.35) stays the locked plan constant.
+
+### 28. Sweep-transition FPS dip — TUNE (logged 2026-07-26)
+G8 operator report: FPS steady ~90 when stationary in a sweep, but
+dips to 30–40 during sweep transitions (cubemap load + texture upload).
+Acceptable for the current simple-jump mechanism (F4.3); the projective
+morphing transition (T2, Phase M7–9) will restructure the load path
+(neighbor prefetch, VRAM discipline, async texture upload) so this is
+expected to improve. If it persists after T2, investigate:
+- KTX2 cubemap compression (P4) — smaller payloads, GPU-native decode;
+- WebWorker texture decode (offload blocking ArrayBuffer → GPU upload);
+- progressive cubemap (low-res faces first, swap to 4K async);
+- texture pool / LRU cache (avoid full dispose+recreate cycle).
 
 ---
 

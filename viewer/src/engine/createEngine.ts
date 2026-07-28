@@ -13,14 +13,18 @@ export interface CreatedEngine {
  * WebGPU-native when available, automatic WebGL2 fallback otherwise.
  */
 export async function createEngine(canvas: HTMLCanvasElement): Promise<CreatedEngine> {
-  if (await WebGPUEngine.IsSupportedAsync) {
-    const engine = new WebGPUEngine(canvas, {
-      antialias: true,
-      powerPreference: "high-performance",
-      adaptToDeviceRatio: true,
-    });
-    await engine.initAsync();
-    return { engine, backend: "webgpu" };
+  try {
+    if (await WebGPUEngine.IsSupportedAsync) {
+      const engine = new WebGPUEngine(canvas, {
+        antialias: true,
+        powerPreference: "high-performance",
+        adaptToDeviceRatio: true,
+      });
+      await engine.initAsync();
+      return { engine, backend: "webgpu" };
+    }
+  } catch (err) {
+    console.warn("[engine] WebGPU initialization failed, falling back to WebGL2:", err);
   }
 
   const engine = new Engine(

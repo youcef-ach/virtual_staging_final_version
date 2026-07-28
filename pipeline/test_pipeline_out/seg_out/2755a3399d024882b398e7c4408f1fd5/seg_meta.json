@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "sweep_uuid": "2755a3399d024882b398e7c4408f1fd5",
+  "index": 48,
+  "params": {
+    "model_name": "facebook/mask2former-swin-tiny-ade-semantic",
+    "mask_size": 640,
+    "upright": true
+  },
+  "runtime": {
+    "device": "cpu",
+    "fp16": false
+  },
+  "classes": [
+    "other",
+    "floor",
+    "wall",
+    "ceiling",
+    "window",
+    "door",
+    "furniture"
+  ],
+  "mask_orientation": "stored canonical (pixel-aligned with extracted faces); inference ran upright",
+  "files": {
+    "faces": {
+      "px": {
+        "ade": "px_ade.png",
+        "cls": "px_cls.png"
+      },
+      "nx": {
+        "ade": "nx_ade.png",
+        "cls": "nx_cls.png"
+      },
+      "py": {
+        "ade": "py_ade.png",
+        "cls": "py_cls.png"
+      },
+      "ny": {
+        "ade": "ny_ade.png",
+        "cls": "ny_cls.png"
+      },
+      "pz": {
+        "ade": "pz_ade.png",
+        "cls": "pz_cls.png"
+      },
+      "nz": {
+        "ade": "nz_ade.png",
+        "cls": "nz_cls.png"
+      }
+    }
+  },
+  "stats": {
+    "class_fractions": {
+      "other": 0.017191162109375,
+      "floor": 0.2202587890625,
+      "wall": 0.434324951171875,
+      "ceiling": 0.14878580729166666,
+      "window": 0.01379150390625,
+      "door": 0.07968465169270833,
+      "furniture": 0.085963134765625
+    },
+    "seconds": 12.973441899986938
+  }
+}

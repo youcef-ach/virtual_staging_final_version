@@ -5,6 +5,19 @@ import { TourViewer } from "./scenes/tourViewer";
 import { StagingLayer } from "./scenes/staging";
 import { IblLighting } from "./scenes/lighting";
 import { ContactShadow } from "./scenes/shadow";
+import { NavHotspots } from "./scenes/navHotspots";
+import { SweepTransition } from "./scenes/transition";
+import { TextureCache } from "./scenes/textureCache";
+import { DollhouseView } from "./scenes/dollhouse";
+import { loadFloorplan, createMinimap } from "./ui/minimap";
+import type { MinimapController } from "./ui/minimap";
+import { MeasureTool } from "./scenes/measure";
+import {
+  saveProject,
+  loadProject,
+  exportProject,
+  parseShareLink,
+} from "./data/stagingProject";
 import { useViewerStore } from "./state/store";
 
 const DATA_BASE_URL = "/data";
@@ -16,6 +29,8 @@ const NUDGE_BIG_M = 0.25;
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const viewerRef = useRef<TourViewer | null>(null);
+  const navRef = useRef<NavHotspots | null>(null);
+  const minimapRef = useRef<MinimapController | null>(null);
   const backend = useViewerStore((s) => s.backend);
   const fps = useViewerStore((s) => s.fps);
   const status = useViewerStore((s) => s.status);
@@ -60,16 +75,39 @@ export default function App() {
         // G7.3: contact shadow -- catcher follows the asset; light direction
         // derives from the active sweep's IBL polynomial.
         const shadow = new ContactShadow(viewer.scene);
+        // T5: measurement tools (point-to-point distance + area).
+        const measure = new MeasureTool(viewer.scene);
+        // T1: navigation hotspot markers (click-to-jump floor discs).
+        const hotspots = new NavHotspots(viewer.scene);
+        if (tour.nav) {
+          hotspots.loadGraph(tour.nav);
+        }
+        navRef.current = hotspots;
+        // T3: dollhouse view (orbit camera + sweep markers on reference mesh).
+        const dollhouse = new DollhouseView(viewer.scene);
+        dollhouse.initMarkers(tour.sweeps);
         viewer.onSweepShown = (uuid) => {
           useViewerStore.getState().setActiveSweep(uuid);
           // LOCAL X-ray scope follows the camera across sweep jumps.
           staging.refreshXray(viewer.getCamera().position);
+          // T1: update hotspot markers for the new sweep's neighbors.
+          hotspots.showForSweep(uuid, viewer.getCamera().position.y);
+          // T3: highlight the active sweep in dollhouse mode.
+          dollhouse.setActiveSweep(uuid);
+          // T4: update minimap position indicator.
+          minimapRef.current?.setActiveSweep(uuid);
           void lighting
             .setForSweep(uuid, `${DATA_BASE_URL}/env/${uuid}.env`, viewer.getPanoOrientation())
             .then((state) => {
               useViewerStore.getState().setEnvState(state);
               shadow.updateFromEnvironment(viewer.scene.environmentTexture);
             });
+          // T7: auto-save project state on every sweep change.
+          saveProject(
+            uuid,
+            staging.getAssetPosition(),
+            staging.getAssetRotationY(),
+          );
         };
         void staging
           .loadProxy([
@@ -86,7 +124,20 @@ export default function App() {
               );
           });
         // G7.1 ground-truth reference (optional file): textured MatterPak mesh.
-        void staging.loadReference(`${DATA_BASE_URL}/reference.glb`);
+        // T2: after the reference loads, create the projective transition controller.
+        void staging.loadReference(`${DATA_BASE_URL}/reference.glb`).then((loaded) => {
+          if (loaded) {
+            const refMeshes = staging.getReferenceMeshes();
+            if (refMeshes.length > 0) {
+              const transition = new SweepTransition(viewer.scene, [...refMeshes]);
+              viewer.setTransition(transition);
+              console.info(`[transition] projective morph ready (${refMeshes.length} ref meshes)`);
+            }
+          }
+        });
+        // T2: texture cache for neighbor prefetch (VRAM-bounded LRU).
+        const texCache = new TextureCache(viewer.scene);
+        viewer.setTextureCache(texCache);
         void staging
           .loadAsset(`${DATA_BASE_URL}/asset.glb`)
           .then(() => {
@@ -102,8 +153,40 @@ export default function App() {
 
         const onDblClick = (event: MouseEvent) => {
           staging.placeFromPick(event.offsetX, event.offsetY);
+          // T7: auto-save after placement.
+          saveProject(
+            viewer.activeSweepUuid,
+            staging.getAssetPosition(),
+            staging.getAssetRotationY(),
+          );
         };
         canvas.addEventListener("dblclick", onDblClick);
+
+        // T6: shift+click drag to slide asset on floor; auto wall-snap on release.
+        const onDragStart = (event: PointerEvent) => {
+          if (!event.shiftKey || event.button !== 0) return;
+          staging.dragStart();
+          canvas.setPointerCapture(event.pointerId);
+          event.preventDefault();
+        };
+        const onDragMove = (event: PointerEvent) => {
+          if (!staging.isDragging) return;
+          staging.dragMove(event.offsetX, event.offsetY);
+        };
+        const onDragEnd = (event: PointerEvent) => {
+          if (!staging.isDragging) return;
+          staging.dragEnd(true); // auto wall-snap
+          canvas.releasePointerCapture(event.pointerId);
+          // T7: auto-save after drag.
+          saveProject(
+            viewer.activeSweepUuid,
+            staging.getAssetPosition(),
+            staging.getAssetRotationY(),
+          );
+        };
+        canvas.addEventListener("pointerdown", onDragStart);
+        canvas.addEventListener("pointermove", onDragMove);
+        canvas.addEventListener("pointerup", onDragEnd);
 
         // G7.1 defect triage: Ctrl+click identifies the proxy mesh under the
         // cursor (exact sub-mesh name -> console + HUD, magenta highlight).
@@ -112,6 +195,32 @@ export default function App() {
           useViewerStore.getState().setPickInfo(staging.identify(event.offsetX, event.offsetY));
         };
         canvas.addEventListener("pointerdown", onIdentify);
+
+        // T1/T3: single-click on a nav hotspot or dollhouse marker -> jump.
+        const onHotspotClick = (event: PointerEvent) => {
+          if (event.ctrlKey) return;
+          if (viewer.isTransitioning) return;
+          // T5: in measurement mode, add points instead of jumping.
+          if (measure.mode !== "off") {
+            const status = measure.addPoint(event.offsetX, event.offsetY);
+            if (status) useViewerStore.getState().setPickInfo(status);
+            return;
+          }
+          // T3: in dollhouse mode, pick sweep markers instead of nav hotspots.
+          if (dollhouse.isActive) {
+            const target = dollhouse.pick(event.offsetX, event.offsetY);
+            if (target) {
+              dollhouse.exit(viewer.getCamera());
+              void viewer.showSweep(target);
+            }
+            return;
+          }
+          const target = hotspots.pick(event.offsetX, event.offsetY);
+          if (target) {
+            void viewer.showSweep(target);
+          }
+        };
+        canvas.addEventListener("click", onHotspotClick);
 
         const onKeyDown = (event: KeyboardEvent) => {
           const step = event.shiftKey ? NUDGE_BIG_M : NUDGE_M;
@@ -172,6 +281,54 @@ export default function App() {
             case "G":
               staging.toggleReferenceOccluder();
               break;
+            case "h":
+            case "H":
+              // T3: toggle dollhouse view.
+              if (dollhouse.isActive) {
+                dollhouse.exit(viewer.getCamera());
+              } else {
+                dollhouse.enter(viewer.getCamera());
+              }
+              break;
+            case "m":
+            case "M":
+              // T4: toggle minimap.
+              if (minimapRef.current) {
+                const el = document.getElementById("minimap");
+                if (el) {
+                  const visible = el.style.display !== "none";
+                  minimapRef.current.setVisible(!visible);
+                }
+              }
+              break;
+            case "l":
+            case "L": {
+              // T5: cycle measurement mode.
+              const mmode = measure.cycleMode();
+              useViewerStore.getState().setPickInfo(
+                mmode === "off" ? null : `📏 ${mmode} mode — click to place points`,
+              );
+              break;
+            }
+            case "Escape":
+              // T5: finish area measurement or disable measure mode.
+              if (measure.mode === "area") {
+                const result = measure.finishArea();
+                if (result) useViewerStore.getState().setPickInfo(result);
+              } else if (measure.mode !== "off") {
+                measure.disable();
+                useViewerStore.getState().setPickInfo(null);
+              }
+              break;
+            case "s":
+            case "S":
+              // T7: export staging project as JSON file.
+              exportProject(
+                viewer.activeSweepUuid,
+                staging.getAssetPosition(),
+                staging.getAssetRotationY(),
+              );
+              break;
             default:
               return;
           }
@@ -191,17 +348,44 @@ export default function App() {
           window.removeEventListener("resize", onResize);
           window.removeEventListener("keydown", onKeyDown);
           canvas.removeEventListener("dblclick", onDblClick);
+          canvas.removeEventListener("pointerdown", onDragStart);
+          canvas.removeEventListener("pointermove", onDragMove);
+          canvas.removeEventListener("pointerup", onDragEnd);
           canvas.removeEventListener("pointerdown", onIdentify);
+          canvas.removeEventListener("click", onHotspotClick);
+          navRef.current = null;
+          minimapRef.current?.dispose();
+          minimapRef.current = null;
           viewer.dispose();
           engine.dispose();
           viewerRef.current = null;
         };
 
-        await viewer.showSweep(tour.sweeps[0].uuid);
+        // T7: restore project from URL hash or localStorage.
+        const shareProject = parseShareLink();
+        const savedProject = shareProject ?? loadProject();
+        const initialSweepUuid = savedProject?.activeSweepUuid ?? tour.sweeps[0].uuid;
+        // Validate the sweep UUID exists in the tour.
+        const validSweep = tour.sweeps.some((s) => s.uuid === initialSweepUuid);
+        await viewer.showSweep(validSweep ? initialSweepUuid : tour.sweeps[0].uuid);
         // If the asset finished loading before the first sweep positioned the
         // camera, re-run the initial placement from the real viewpoint.
-        staging.placeInFrontOf(viewer.getCamera());
+        if (savedProject?.asset) {
+          staging.restoreAssetState(savedProject.asset.position, savedProject.asset.rotationY);
+        } else {
+          staging.placeInFrontOf(viewer.getCamera());
+        }
         useViewerStore.getState().setStatus("ready");
+
+        // T4: load floorplan and create minimap overlay.
+        const floorplan = await loadFloorplan(DATA_BASE_URL);
+        if (floorplan && canvas.parentElement) {
+          const mm = createMinimap(canvas.parentElement, floorplan, (uuid) => {
+            void viewer.showSweep(uuid);
+          });
+          mm.setActiveSweep(tour.sweeps[0].uuid);
+          minimapRef.current = mm;
+        }
       } catch (error) {
         useViewerStore.getState().setError(error instanceof Error ? error.message : String(error));
       }
@@ -217,7 +401,21 @@ export default function App() {
     void viewerRef.current?.showSweep(uuid);
   };
   const goNeighbor = (offset: number) => {
-    void viewerRef.current?.showNeighbor(offset);
+    const viewer = viewerRef.current;
+    const hotspots = navRef.current;
+    if (!viewer || viewer.isTransitioning) return; // T2: block during animation
+    // T1: use nav graph neighbors when available, fallback to sequential.
+    const uuid = useViewerStore.getState().activeSweepUuid;
+    if (uuid && hotspots) {
+      const nbrs = hotspots.getNeighbors(uuid);
+      if (nbrs && nbrs.length > 0) {
+        // offset > 0 = next neighbor (nearest), < 0 = previous (farthest nearby)
+        const idx = offset > 0 ? 0 : Math.min(nbrs.length - 1, 2);
+        void viewer.showSweep(nbrs[idx]);
+        return;
+      }
+    }
+    void viewer.showNeighbor(offset);
   };
 
   const activeIndex = sweeps.find((s) => s.uuid === activeSweepUuid)?.index;

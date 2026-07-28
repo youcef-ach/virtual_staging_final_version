@@ -85,10 +85,19 @@ def extract_poses(e57_path: Path) -> list[SweepPose]:
     Rule): every consumer of the returned poses works in runtime Y-up.
     """
     import pye57  # local import: keeps module importable without libE57 present
+    import os
 
     e57 = pye57.E57(str(e57_path))
     sweeps: list[SweepPose] = []
-    for index in range(e57.scan_count):
+    
+    sweep_range = range(e57.scan_count)
+    if os.environ.get("VS_TEST_SWEEP_RANGE"):
+        parts = os.environ["VS_TEST_SWEEP_RANGE"].split("-")
+        sweep_range = range(int(parts[0]), int(parts[1]) + 1)
+        
+    for index in sweep_range:
+        if index >= e57.scan_count:
+            continue
         header = e57.get_header(index)
         pose_mp = pose_matrix_from_header(header)
         pose_rt = convert_pose_zup_to_yup(pose_mp)

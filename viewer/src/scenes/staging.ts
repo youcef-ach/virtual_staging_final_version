@@ -66,6 +66,26 @@ export class StagingLayer {
   private assetRoot: TransformNode | null = null;
   private userPlaced = false;
 
+  /** T7: get asset position (or null if no asset loaded). */
+  getAssetPosition(): { x: number; y: number; z: number } | null {
+    if (!this.assetRoot) return null;
+    const p = this.assetRoot.position;
+    return { x: p.x, y: p.y, z: p.z };
+  }
+
+  /** T7: get asset Y rotation in radians (or null). */
+  getAssetRotationY(): number | null {
+    return this.assetRoot?.rotation.y ?? null;
+  }
+
+  /** T7: restore asset state from a saved project. */
+  restoreAssetState(position: [number, number, number], rotationY: number): void {
+    if (!this.assetRoot) return;
+    this.assetRoot.position.set(position[0], position[1], position[2]);
+    this.assetRoot.rotation.y = rotationY;
+    this.userPlaced = true;
+  }
+
   constructor(scene: Scene) {
     this.scene = scene;
     // Layer 3 must depth-test against the proxy depth written in GROUP_PROXY:
@@ -297,6 +317,11 @@ export class StagingLayer {
   private readonly refMats: (Material | null)[] = [];
   private refOccluding = false;
 
+  /** T2: expose reference meshes for the projective transition shader. */
+  getReferenceMeshes(): readonly AbstractMesh[] {
+    return this.refMeshes;
+  }
+
   /**
    * G7.1 ground-truth reference: the textured MatterPak mesh (OBJ exported
    * as GLB). Its textures DERIVE from the panos, so with a correct pano
@@ -320,11 +345,14 @@ export class StagingLayer {
           this.refMats.push(mesh.material);
         }
       }
+      // The MatterPak GLB is Z-up; rotate -90° around X to align with
+      // Babylon's Y-up scene (empirically confirmed: rotX=270° = -PI/2).
+      root.rotation.x = -Math.PI / 2;
+      this.refZup = true;
       root.setEnabled(false); // B shows it
       this.refRoot = root;
       console.info(
-        `[staging] reference mesh loaded (${result.meshes.length} meshes) -- ` +
-          "B toggles visibility, N toggles the Z-up frame fix",
+        `[staging] reference mesh loaded (${result.meshes.length} meshes, Z-up→Y-up applied)`,
       );
       return true;
     } catch {
@@ -467,7 +495,10 @@ export class StagingLayer {
    * at pickedPoint. Shift the hierarchy so the bounding-box bottom sits
    * exactly at the root origin.
    */
-  async loadAsset(url: string): Promise<void> {
+  async loadAsset(
+    url: string,
+    options?: { isPreNormalized?: boolean; lod?: "lod0" | "lod1" | "lod2" },
+  ): Promise<void> {
     const result = await ImportMeshAsync(url, this.scene);
     const root = new TransformNode("asset-root", this.scene);
     const pivot = new TransformNode("asset-pivot", this.scene);
@@ -479,15 +510,18 @@ export class StagingLayer {
       mesh.renderingGroupId = GROUP_ASSET;
       mesh.isPickable = false; // placement raycasts must reach the floor
     }
-    let minY = Number.POSITIVE_INFINITY;
-    for (const mesh of result.meshes) {
-      if (mesh.getTotalVertices() > 0) {
-        mesh.computeWorldMatrix(true);
-        minY = Math.min(minY, mesh.getBoundingInfo().boundingBox.minimumWorld.y);
+
+    if (!options?.isPreNormalized) {
+      let minY = Number.POSITIVE_INFINITY;
+      for (const mesh of result.meshes) {
+        if (mesh.getTotalVertices() > 0) {
+          mesh.computeWorldMatrix(true);
+          minY = Math.min(minY, mesh.getBoundingInfo().boundingBox.minimumWorld.y);
+        }
       }
-    }
-    if (Number.isFinite(minY) && minY !== 0) {
-      pivot.position.y = -minY;
+      if (Number.isFinite(minY) && Math.abs(minY) > 0.001) {
+        pivot.position.y = -minY;
+      }
     }
     this.assetRoot = root;
   }
@@ -568,5 +602,104 @@ export class StagingLayer {
   rotate(rad: number): void {
     if (!this.assetRoot) return;
     this.assetRoot.rotation.y += rad;
+  }
+
+  // ---------------------------------------------------------------------------
+  // T6: drag-drop staging editor
+  // ---------------------------------------------------------------------------
+
+  private _isDragging = false;
+
+  /** True while the asset is being dragged. */
+  get isDragging(): boolean {
+    return this._isDragging;
+  }
+
+  /** Start drag: record that we're in drag mode. */
+  dragStart(): void {
+    if (!this.assetRoot) return;
+    this._isDragging = true;
+  }
+
+  /**
+   * Drag move: raycast to floor under cursor and move asset there.
+   * Returns true if the asset was repositioned.
+   */
+  dragMove(x: number, y: number): boolean {
+    if (!this._isDragging || !this.assetRoot) return false;
+    const hit = this.scene.pick(x, y, isFloor);
+    if (!hit?.hit || !hit.pickedPoint) return false;
+    this.assetRoot.position.x = hit.pickedPoint.x;
+    this.assetRoot.position.z = hit.pickedPoint.z;
+    // Keep Y locked to the floor surface.
+    this.assetRoot.position.y = hit.pickedPoint.y;
+    this.userPlaced = true;
+    return true;
+  }
+
+  /** End drag. Optionally auto-snap to nearest wall. */
+  dragEnd(autoSnap: boolean = true): void {
+    this._isDragging = false;
+    if (autoSnap) {
+      this.snapToNearestWall();
+    }
+  }
+
+  /**
+   * T6 wall snap: if the asset is within SNAP_DISTANCE of a wall mesh,
+   * push it flush against the wall and rotate to face along the wall normal.
+   */
+  private static readonly SNAP_DISTANCE_M = 0.4;
+
+  snapToNearestWall(): boolean {
+    if (!this.assetRoot) return false;
+    const pos = this.assetRoot.position;
+
+    // Cast rays in 8 compass directions from the asset position to find walls.
+    const directions = [
+      new Vector3(1, 0, 0),
+      new Vector3(-1, 0, 0),
+      new Vector3(0, 0, 1),
+      new Vector3(0, 0, -1),
+      new Vector3(0.707, 0, 0.707),
+      new Vector3(-0.707, 0, 0.707),
+      new Vector3(0.707, 0, -0.707),
+      new Vector3(-0.707, 0, -0.707),
+    ];
+
+    const isWall = (m: AbstractMesh): boolean =>
+      m.isPickable && m.name.includes("wall") && m.renderingGroupId === GROUP_PROXY;
+
+    let bestDist = StagingLayer.SNAP_DISTANCE_M;
+    let bestNormal: Vector3 | null = null;
+    let bestPoint: Vector3 | null = null;
+
+    for (const dir of directions) {
+      const ray = new Ray(pos, dir, StagingLayer.SNAP_DISTANCE_M);
+      const hit = this.scene.pickWithRay(ray, isWall);
+      if (hit?.hit && hit.pickedPoint && hit.distance < bestDist) {
+        bestDist = hit.distance;
+        bestNormal = hit.getNormal(true) ?? null;
+        bestPoint = hit.pickedPoint.clone();
+      }
+    }
+
+    if (!bestNormal || !bestPoint) return false;
+
+    // Push asset flush against the wall (offset by a small margin).
+    const margin = 0.02;
+    const pushDir = bestNormal.scale(margin);
+    this.assetRoot.position.x = bestPoint.x + pushDir.x;
+    this.assetRoot.position.z = bestPoint.z + pushDir.z;
+    // Keep Y locked.
+
+    // Rotate asset to face outward from the wall (normal direction).
+    const angle = Math.atan2(bestNormal.x, bestNormal.z);
+    this.assetRoot.rotation.y = angle;
+
+    console.info(
+      `[staging] wall snap: dist=${bestDist.toFixed(3)} m, angle=${((angle * 180) / Math.PI).toFixed(1)}°`,
+    );
+    return true;
   }
 }

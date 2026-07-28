@@ -44,7 +44,39 @@ export interface SweepData {
   faces: Record<string, string>;
 }
 
+/** T1 navigation graph types (navigation_graph.json). */
+export interface NavNode {
+  uuid: string;
+  index: number;
+  position: [number, number, number];
+  room?: string;
+}
+
+export interface NavEdge {
+  from: string;
+  to: string;
+  distance_m: number;
+  portal: boolean;
+  room?: string;
+  opening_kind?: string;
+  opening_plane?: string;
+}
+
+export interface NavGraph {
+  schema_version: number;
+  coordinate_frame: string;
+  node_count: number;
+  edge_count: number;
+  portal_count: number;
+  connected_components: number;
+  nodes: NavNode[];
+  edges: NavEdge[];
+}
+
 export interface TourData {
   baseUrl: string;
   sweeps: SweepData[];
+  /** T1 navigation graph — null if navigation_graph.json not found. */
+  nav: NavGraph | null;
 }
+

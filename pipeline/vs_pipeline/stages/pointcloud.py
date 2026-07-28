@@ -126,15 +126,27 @@ def preprocess_property(
 
     e57 = pye57.E57(str(e57_path))
     total = e57.scan_count
-    count = total if limit <= 0 else min(limit, total)
+    
+    import os
+    sweep_range = range(total)
+    if os.environ.get("VS_TEST_SWEEP_RANGE"):
+        parts = os.environ["VS_TEST_SWEEP_RANGE"].split("-")
+        sweep_range = range(int(parts[0]), int(parts[1]) + 1)
+    else:
+        if limit > 0:
+            sweep_range = range(min(limit, total))
+
+    count = len(sweep_range)
     cache = out_dir / "sweep_cache"
     cache.mkdir(parents=True, exist_ok=True)
 
     new_stats: dict[str, dict[str, int]] = {}
-    for index in range(count):
+    for index in sweep_range:
+        if index >= total:
+            continue
         chunk_path = cache / f"scan_{index:03d}.ply"
         if chunk_path.exists() and not force:
-            print(f"[{index:03d}/{count - 1}] cached -> skip")
+            print(f"[{index:03d}] cached -> skip")
             continue
         started = time.perf_counter()
         header = e57.get_header(index)

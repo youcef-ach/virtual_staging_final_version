@@ -15,6 +15,11 @@ class Settings(BaseSettings):
     version: str = "0.1.0"
     environment: str = "development"
 
+    # Security & Auth
+    jwt_secret_key: str = "vs-dev-secret-key-change-in-production-32-chars"
+    jwt_algorithm: str = "HS256"
+    jwt_access_token_expire_minutes: int = 60 * 24 * 7  # 7 days
+
     # PostgreSQL 16 (docker compose service `db`).
     database_url: str = "postgresql+psycopg://vs:vs@localhost:5432/virtual_staging"
 

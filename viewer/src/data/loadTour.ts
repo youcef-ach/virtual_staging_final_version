@@ -1,8 +1,9 @@
-import type { PanoramaManifest, PosesFile, SweepData, TourData } from "./types";
+import type { NavGraph, PanoramaManifest, PosesFile, SweepData, TourData } from "./types";
 
 /**
  * Loads and joins the pipeline outputs (manifest.json + poses.json) into a
- * viewer-ready tour model, keyed by sweep UUID.
+ * viewer-ready tour model, keyed by sweep UUID. Also loads the T1 navigation
+ * graph (navigation_graph.json) when available.
  */
 export async function loadTour(baseUrl: string): Promise<TourData> {
   const [manifestRes, posesRes] = await Promise.all([
@@ -51,5 +52,45 @@ export async function loadTour(baseUrl: string): Promise<TourData> {
   if (sweeps.length === 0) {
     throw new Error("no complete sweeps with matching poses (manifest/poses UUID mismatch?)");
   }
-  return { baseUrl, sweeps };
+
+  // T1: navigation graph (optional — tour works without it).
+  let nav: NavGraph | null = null;
+  try {
+    const navRes = await fetch(`${baseUrl}/navigation_graph.json`);
+    if (navRes.ok) {
+      nav = (await navRes.json()) as NavGraph;
+      console.info(
+        `[nav] graph loaded: ${nav.node_count} nodes, ${nav.edge_count} edges ` +
+          `(${nav.portal_count} portal), ${nav.connected_components} component(s)`,
+      );
+    }
+  } catch {
+    // navigation_graph.json missing — the tour keeps working.
+  }
+
+  return { baseUrl, sweeps, nav };
 }
+
+/**
+ * T1: build a neighbor lookup from the navigation graph.
+ * Returns a Map: sweepUuid -> sorted list of neighbor UUIDs (nearest first).
+ */
+export function buildNeighborMap(nav: NavGraph): Map<string, string[]> {
+  const adj = new Map<string, { uuid: string; dist: number }[]>();
+  for (const edge of nav.edges) {
+    if (!adj.has(edge.from)) adj.set(edge.from, []);
+    if (!adj.has(edge.to)) adj.set(edge.to, []);
+    adj.get(edge.from)!.push({ uuid: edge.to, dist: edge.distance_m });
+    adj.get(edge.to)!.push({ uuid: edge.from, dist: edge.distance_m });
+  }
+  const result = new Map<string, string[]>();
+  for (const [uuid, neighbors] of adj) {
+    neighbors.sort((a, b) => a.dist - b.dist);
+    result.set(
+      uuid,
+      neighbors.map((n) => n.uuid),
+    );
+  }
+  return result;
+}
+

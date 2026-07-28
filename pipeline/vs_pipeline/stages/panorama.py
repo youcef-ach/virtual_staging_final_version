@@ -143,10 +143,24 @@ def extract_cubemaps(e57_path: Path, output_dir: Path) -> list[SweepFaces]:
             ) from exc
 
         # Sweep GUID lookup + inverse sweep rotations (world -> scanner-local).
+        import os
+        sweep_range = range(e57.scan_count)
+        if os.environ.get("VS_TEST_SWEEP_RANGE"):
+            parts = os.environ["VS_TEST_SWEEP_RANGE"].split("-")
+            sweep_range = range(int(parts[0]), int(parts[1]) + 1)
+            
         scan_index_by_guid: dict[str, int] = {}
         sweeps: list[SweepFaces] = []
         inv_rotations: list[np.ndarray] = []
+        # We must index sweeps based on the actual scan indices, but inv_rotations and sweeps list
+        # are mapped by index. We will pad None for skipped indices to maintain indices for later lookup.
+        # Actually, `extract_cubemaps` uses `scan_idx >= len(sweeps)` so it expects `sweeps` to match `e57.scan_count`
+        # To make it safer, we just append None to `sweeps` for skipped indices.
         for scan_idx in range(e57.scan_count):
+            if scan_idx not in sweep_range:
+                sweeps.append(None)
+                inv_rotations.append(None)
+                continue
             header = e57.get_header(scan_idx)
             guid = _read_scan_guid(header) or fallback_sweep_uuid(e57_path.name, scan_idx)
             scan_index_by_guid[guid] = scan_idx
@@ -162,7 +176,7 @@ def extract_cubemaps(e57_path: Path, output_dir: Path) -> list[SweepFaces]:
             scan_idx = scan_index_by_guid.get(assoc) if assoc is not None else None
             if scan_idx is None:
                 scan_idx = img_idx // 6  # Matterport fallback: 6 faces per sweep, in order
-            if scan_idx >= len(sweeps):
+            if scan_idx >= len(sweeps) or sweeps[scan_idx] is None:
                 continue
 
             quat = _read_image_quaternion(img_node)
@@ -203,7 +217,7 @@ def extract_cubemaps(e57_path: Path, output_dir: Path) -> list[SweepFaces]:
                 )
             out_path.write_bytes(encoded.tobytes())
             sweep.faces[face] = f"{sweep.sweep_uuid}/{face}.jpg"
-        return sweeps
+        return [s for s in sweeps if s is not None]
     finally:
         e57.close()
 

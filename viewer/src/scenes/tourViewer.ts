@@ -7,6 +7,8 @@ import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { CubeTexture } from "@babylonjs/core/Materials/Textures/cubeTexture";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture";
+import type { SweepTransition } from "./transition";
+import type { TextureCache } from "./textureCache";
 import type { SweepData, TourData } from "../data/types";
 
 /** Babylon CubeTexture file order: +x, +y, +z, -x, -y, -z. */
@@ -65,6 +67,10 @@ export class TourViewer {
   private pitch = 0;
   private currentPoseRotation: Matrix = Matrix.Identity();
   private detachControls: (() => void) | null = null;
+  /** T2: transition controller (set after reference mesh loads). */
+  private transition: SweepTransition | null = null;
+  /** T2: cubemap cache for neighbor prefetch. */
+  private textureCache: TextureCache | null = null;
 
   constructor(
     engine: AbstractEngine,
@@ -111,6 +117,31 @@ export class TourViewer {
     return this.currentPoseRotation.multiply(SKYBOX_BASE);
   }
 
+  /**
+   * T2 alignment fix: the pure pose rotation (R^T, world→scanner-local)
+   * WITHOUT Babylon's SKYBOX_BASE. The projective shader samples via
+   * textureCube() directly — it needs the scanner-local direction, not the
+   * Babylon skybox reflection convention.
+   */
+  getPoseRotation(): Matrix {
+    return this.currentPoseRotation.clone();
+  }
+
+  /** T2: set the transition controller (call after reference mesh is loaded). */
+  setTransition(transition: SweepTransition): void {
+    this.transition = transition;
+  }
+
+  /** T2: set the texture cache for prefetch. */
+  setTextureCache(cache: TextureCache): void {
+    this.textureCache = cache;
+  }
+
+  /** T2: true while a projective transition is animating. */
+  get isTransitioning(): boolean {
+    return this.transition?.isTransitioning ?? false;
+  }
+
   /** Toggle the pano skybox (P key): proxy-only debug view. Returns new state. */
   toggleSkybox(): boolean {
     const skybox = this.scene.getMeshByName("skybox");
@@ -120,28 +151,97 @@ export class TourViewer {
     return next;
   }
 
-  /** Load a sweep's cubemap and move the camera to its pose position. */
+  /**
+   * Load a sweep's cubemap and move the camera to its pose position.
+   * T2: if a transition controller is set, animates via projective morph;
+   * otherwise instant-jumps (the G7 behavior).
+   */
   async showSweep(uuid: string): Promise<void> {
+    if (this.transition?.isTransitioning) return; // block during animation
+
     const sweep = this.tour.sweeps.find((s) => s.uuid === uuid);
     if (!sweep) {
       throw new Error(`unknown sweep: ${uuid}`);
     }
-    const files = FACE_ORDER.map((face) => `${this.tour.baseUrl}/${sweep.faces[face]}`);
-    // Unique cache key per sweep: Babylon caches cube textures by rootUrl.
-    const texture = await this.loadCubeTexture(`sweep:${sweep.uuid}`, files);
-    texture.coordinatesMode = Texture.SKYBOX_MODE;
-    this.currentPoseRotation = TourViewer.rotationFromPose(sweep);
-    texture.setReflectionTextureMatrix(this.getPanoOrientation());
 
+    const files = FACE_ORDER.map((face) => `${this.tour.baseUrl}/${sweep.faces[face]}`);
+
+    // T2: use cache if available, otherwise load directly.
+    const texture = this.textureCache
+      ? await this.textureCache.get(sweep.uuid, files)
+      : await this.loadCubeTexture(`sweep:${sweep.uuid}`, files);
+    texture.coordinatesMode = Texture.SKYBOX_MODE;
+
+    const destPoseRotation = TourViewer.rotationFromPose(sweep);
+    const destOrientation = destPoseRotation.multiply(SKYBOX_BASE);
+    texture.setReflectionTextureMatrix(destOrientation);
+
+    const destPos = new Vector3(sweep.position[0], sweep.position[1], sweep.position[2]);
+
+    // T2: attempt animated transition if we have a departure sweep and
+    // the transition controller is ready.
+    const canTransition =
+      this.transition &&
+      this.activeTexture &&
+      this.activeUuid &&
+      this.activeUuid !== uuid;
+
+    if (canTransition) {
+      const departureCubemap = this.activeTexture!;
+      // T2 alignment: pass pure pose rotation (world→scanner-local) — NOT
+      // the combined pano orientation which includes Babylon's SKYBOX_BASE.
+      const departureOrientation = this.getPoseRotation();
+      const departurePos = this.camera.position.clone();
+
+      // The midpoint callback swaps the skybox to the destination.
+      const onMidpoint = () => {
+        this.currentPoseRotation = destPoseRotation;
+        this.skyboxMaterial.reflectionTexture = texture;
+        this.activeTexture = texture;
+        this.camera.position.copyFrom(destPos);
+        this.applyLook();
+        this.activeUuid = uuid;
+        this.onSweepShown?.(uuid);
+        // Detach the departure texture from cache (now owned by skybox).
+        this.textureCache?.detach(uuid);
+      };
+
+      await this.transition!.flyTo(
+        departureCubemap,
+        departureOrientation,
+        departurePos,
+        destPos,
+        this.camera,
+        onMidpoint,
+      );
+
+      // Dispose the old departure texture AFTER the transition completes.
+      if (departureCubemap !== texture) {
+        departureCubemap.dispose();
+      }
+
+      // Prefetch neighbors of the new sweep.
+      this.prefetchNeighbors(uuid);
+      return;
+    }
+
+    // Instant jump (no transition available or first sweep).
     const previous = this.activeTexture;
+    this.currentPoseRotation = destPoseRotation;
     this.skyboxMaterial.reflectionTexture = texture;
     this.activeTexture = texture;
-    previous?.dispose(); // VRAM discipline
+    if (previous && previous !== texture) {
+      previous.dispose(); // VRAM discipline
+    }
+    this.textureCache?.detach(uuid);
 
-    this.camera.position.set(sweep.position[0], sweep.position[1], sweep.position[2]);
+    this.camera.position.copyFrom(destPos);
     this.applyLook();
     this.activeUuid = uuid;
     this.onSweepShown?.(uuid);
+
+    // Prefetch neighbors of the new sweep.
+    this.prefetchNeighbors(uuid);
   }
 
   /** Simple jump to the previous / next sweep by capture index. */
@@ -155,10 +255,36 @@ export class TourViewer {
   }
 
   dispose(): void {
+    this.transition?.abort();
     this.detachControls?.();
     this.detachControls = null;
+    this.textureCache?.dispose();
     this.activeTexture?.dispose();
     this.scene.dispose();
+  }
+
+  /**
+   * T2: prefetch cubemaps for the nav-graph neighbors of the given sweep.
+   * Uses the tour's sweep data to build file URLs.
+   */
+  private prefetchNeighbors(uuid: string): void {
+    if (!this.textureCache || !this.tour.nav) return;
+    // Build adjacency from the nav graph edges (reuse the edge list).
+    const neighbors: string[] = [];
+    for (const edge of this.tour.nav.edges) {
+      if (edge.from === uuid) neighbors.push(edge.to);
+      else if (edge.to === uuid) neighbors.push(edge.from);
+    }
+    // Sort by distance (edges are already sorted in the JSON), take top 3.
+    const toFetch = neighbors.slice(0, 3);
+    const items = toFetch
+      .map((nUuid) => {
+        const sw = this.tour.sweeps.find((s) => s.uuid === nUuid);
+        if (!sw) return null;
+        return { uuid: nUuid, baseUrl: this.tour.baseUrl, faces: sw.faces };
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null);
+    this.textureCache.prefetch(items);
   }
 
   /**

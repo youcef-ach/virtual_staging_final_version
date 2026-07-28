@@ -64,6 +64,23 @@ class PublishStage(str, enum.Enum):
     PUBLISHED = "published"
 
 
+class PipelineStatus(str, enum.Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class StageStatus(str, enum.Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+    CANCELLED = "cancelled"
+
+
 class Organization(Base):
     __tablename__ = "organizations"
 
@@ -104,6 +121,8 @@ class ScanVersion(Base):
     is_authoritative: Mapped[bool] = mapped_column(sa.Boolean, default=False)
     #: {category: [{filename, key, sha256, size_bytes}]}; categories: e57 / matterpak / cubemaps
     raw_assets: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    #: The final publish manifest containing CDN URLs
+    published_manifest: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), default=_utcnow)
 
 
@@ -209,3 +228,38 @@ class PublishStateRecord(Base):
     updated_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
     )
+
+
+class PipelineRun(Base):
+    """A single end-to-end pipeline execution for a scan version."""
+
+    __tablename__ = "pipeline_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    scan_version_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("scan_versions.id"), index=True)
+    status: Mapped[PipelineStatus] = mapped_column(
+        _enum(PipelineStatus), default=PipelineStatus.PENDING
+    )
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+
+class StageExecution(Base):
+    """Tracks one stage within a pipeline run."""
+
+    __tablename__ = "stage_executions"
+    __table_args__ = (sa.UniqueConstraint("run_id", "stage_number"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    run_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("pipeline_runs.id"), index=True)
+    stage_number: Mapped[int] = mapped_column(sa.SmallInteger)  # 1–10
+    stage_name: Mapped[str] = mapped_column(sa.String(64))
+    status: Mapped[StageStatus] = mapped_column(
+        _enum(StageStatus), default=StageStatus.PENDING
+    )
+    started_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
+    error_message: Mapped[str | None] = mapped_column(sa.Text)
+    log_path: Mapped[str | None] = mapped_column(sa.String(1024))

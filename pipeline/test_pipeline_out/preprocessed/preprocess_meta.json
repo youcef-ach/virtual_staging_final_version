@@ -1,0 +1,134 @@
+{
+  "schema_version": 1,
+  "coordinate_frame": "runtime_yup",
+  "source_file": "cloud_0.e57",
+  "source_bytes": 26270537728,
+  "params": {
+    "voxel_m": 0.015,
+    "sor_neighbors": 30,
+    "sor_std": 2.0,
+    "normal_radius_m": 0.05
+  },
+  "sweep_count": 198,
+  "processed_sweeps": 21,
+  "scan_stats": {
+    "045": {
+      "raw": 5139695,
+      "after_sor": 4949313,
+      "after_voxel": 806454
+    },
+    "046": {
+      "raw": 5153124,
+      "after_sor": 4935827,
+      "after_voxel": 644341
+    },
+    "047": {
+      "raw": 5134635,
+      "after_sor": 4925043,
+      "after_voxel": 738418
+    },
+    "048": {
+      "raw": 5096326,
+      "after_sor": 4881481,
+      "after_voxel": 684306
+    },
+    "049": {
+      "raw": 5070286,
+      "after_sor": 4882951,
+      "after_voxel": 641397
+    },
+    "050": {
+      "raw": 5121312,
+      "after_sor": 4963507,
+      "after_voxel": 502342
+    },
+    "051": {
+      "raw": 5085107,
+      "after_sor": 4988398,
+      "after_voxel": 568369
+    },
+    "052": {
+      "raw": 5125009,
+      "after_sor": 4918239,
+      "after_voxel": 609650
+    },
+    "053": {
+      "raw": 5166257,
+      "after_sor": 4955276,
+      "after_voxel": 557966
+    },
+    "054": {
+      "raw": 4986776,
+      "after_sor": 4786735,
+      "after_voxel": 515075
+    },
+    "055": {
+      "raw": 5151804,
+      "after_sor": 4956836,
+      "after_voxel": 561174
+    },
+    "056": {
+      "raw": 5152217,
+      "after_sor": 4995488,
+      "after_voxel": 599367
+    },
+    "057": {
+      "raw": 5012233,
+      "after_sor": 4825314,
+      "after_voxel": 618449
+    },
+    "058": {
+      "raw": 5116189,
+      "after_sor": 4940390,
+      "after_voxel": 566391
+    },
+    "059": {
+      "raw": 5131076,
+      "after_sor": 4942903,
+      "after_voxel": 540050
+    },
+    "060": {
+      "raw": 4895058,
+      "after_sor": 4673869,
+      "after_voxel": 310923
+    },
+    "061": {
+      "raw": 5154689,
+      "after_sor": 4994077,
+      "after_voxel": 525919
+    },
+    "062": {
+      "raw": 4874148,
+      "after_sor": 4688680,
+      "after_voxel": 331067
+    },
+    "063": {
+      "raw": 5171202,
+      "after_sor": 5017279,
+      "after_voxel": 512824
+    },
+    "064": {
+      "raw": 5143241,
+      "after_sor": 4986487,
+      "after_voxel": 448824
+    },
+    "065": {
+      "raw": 4903559,
+      "after_sor": 4752129,
+      "after_voxel": 493498
+    }
+  },
+  "merged_chunks": 21,
+  "final_points": 4693492,
+  "bounds_min_rt": [
+    -32.4522815859516,
+    -1.3073080917363005,
+    -3.387395827344625
+  ],
+  "bounds_max_rt": [
+    -11.848807339635536,
+    6.646362519608777,
+    19.47719891636964
+  ],
+  "working_cloud": "working_cloud.ply"
+}
