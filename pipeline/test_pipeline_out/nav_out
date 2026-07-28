@@ -1,0 +1,583 @@
+{
+  "schema_version": 1,
+  "coordinate_frame": "runtime_yup",
+  "node_count": 21,
+  "edge_count": 51,
+  "portal_count": 4,
+  "connected_components": 3,
+  "nodes": [
+    {
+      "uuid": "2a8604496dfa42d3916768694475c2a4",
+      "index": 45,
+      "position": [
+        -18.3286,
+        1.3646,
+        9.4962
+      ],
+      "room": "s0_room_02"
+    },
+    {
+      "uuid": "bf73b36bb69b46d4a524bd0cf2027467",
+      "index": 46,
+      "position": [
+        -20.8606,
+        1.3623,
+        9.4016
+      ],
+      "room": "s0_room_04"
+    },
+    {
+      "uuid": "bc299055acfc411facf95e1df35e4404",
+      "index": 47,
+      "position": [
+        -21.9541,
+        1.3656,
+        9.4288
+      ],
+      "room": "s0_room_00"
+    },
+    {
+      "uuid": "2755a3399d024882b398e7c4408f1fd5",
+      "index": 48,
+      "position": [
+        -23.8563,
+        1.362,
+        9.4408
+      ],
+      "room": "s0_room_00"
+    },
+    {
+      "uuid": "374889945a2947e9a497d9c85eeba377",
+      "index": 49,
+      "position": [
+        -23.5468,
+        1.3612,
+        10.8463
+      ],
+      "room": "s0_room_00"
+    },
+    {
+      "uuid": "6a4d169dca6f4e2c981044b23f589a1d",
+      "index": 50,
+      "position": [
+        -22.9111,
+        1.3557,
+        12.693
+      ],
+      "room": "s0_room_00"
+    },
+    {
+      "uuid": "df10cb83b0fd4bebb470bd02f89dc158",
+      "index": 51,
+      "position": [
+        -24.2981,
+        1.3585,
+        12.7866
+      ],
+      "room": "s0_room_00"
+    },
+    {
+      "uuid": "fcf23d9fb29a42098832bd8f65d6c24f",
+      "index": 52,
+      "position": [
+        -24.5847,
+        1.365,
+        7.3354
+      ],
+      "room": "s0_room_00"
+    },
+    {
+      "uuid": "9587353a2611473d97db87b39f7d4f6c",
+      "index": 53,
+      "position": [
+        -24.4395,
+        1.3674,
+        5.77
+      ],
+      "room": "exterior"
+    },
+    {
+      "uuid": "06e781d7bd2e45a5937dc47795cad24a",
+      "index": 54,
+      "position": [
+        -26.8564,
+        1.3672,
+        5.5225
+      ],
+      "room": "s0_room_03"
+    },
+    {
+      "uuid": "0ff39829bae84fe2941bc36bdf4a83c4",
+      "index": 55,
+      "position": [
+        -24.6083,
+        1.364,
+        4.7964
+      ],
+      "room": "exterior"
+    },
+    {
+      "uuid": "096d46facc654cfcab975c22d5c823ff",
+      "index": 56,
+      "position": [
+        -24.3433,
+        1.3691,
+        2.1396
+      ],
+      "room": "exterior"
+    },
+    {
+      "uuid": "330b04d92caa47ac9da040cb87d26cb4",
+      "index": 57,
+      "position": [
+        -26.9624,
+        1.3691,
+        2.6082
+      ],
+      "room": "s0_room_03"
+    },
+    {
+      "uuid": "4e1abd1c99734ea0bbbadadbd83b11c7",
+      "index": 58,
+      "position": [
+        -27.1545,
+        1.3686,
+        1.1301
+      ],
+      "room": "s0_room_01"
+    },
+    {
+      "uuid": "0c16424acf3c49f8906064d25a842fdd",
+      "index": 59,
+      "position": [
+        -26.9907,
+        1.3709,
+        -0.131
+      ],
+      "room": "s0_room_01"
+    },
+    {
+      "uuid": "06836f5f6ba34703ae3f2fa860256202",
+      "index": 60,
+      "position": [
+        -28.4174,
+        1.3733,
+        -0.0753
+      ],
+      "room": "s0_room_01"
+    },
+    {
+      "uuid": "fc09197b535b435c934ba4dd890490c3",
+      "index": 61,
+      "position": [
+        -26.5595,
+        1.3708,
+        -1.8975
+      ],
+      "room": "s0_room_01"
+    },
+    {
+      "uuid": "802dd7438db243808716cce6f89b567d",
+      "index": 62,
+      "position": [
+        -28.4588,
+        1.3684,
+        -2.0412
+      ],
+      "room": "s0_room_01"
+    },
+    {
+      "uuid": "12a156fc9a1d47b79ed2f6fdc4804278",
+      "index": 63,
+      "position": [
+        -25.4752,
+        1.3667,
+        -1.9222
+      ],
+      "room": "s0_room_01"
+    },
+    {
+      "uuid": "7f21b9106a5542bbaf5136fa958bc74f",
+      "index": 64,
+      "position": [
+        -24.2071,
+        1.3693,
+        -2.0109
+      ],
+      "room": "s0_room_01"
+    },
+    {
+      "uuid": "0f5deab389c24499998bd265254d0447",
+      "index": 65,
+      "position": [
+        -24.2274,
+        1.368,
+        -0.0296
+      ],
+      "room": "s0_room_01"
+    }
+  ],
+  "edges": [
+    {
+      "from": "9587353a2611473d97db87b39f7d4f6c",
+      "to": "0ff39829bae84fe2941bc36bdf4a83c4",
+      "distance_m": 0.988,
+      "portal": false,
+      "room": "exterior"
+    },
+    {
+      "from": "fc09197b535b435c934ba4dd890490c3",
+      "to": "12a156fc9a1d47b79ed2f6fdc4804278",
+      "distance_m": 1.085,
+      "portal": false,
+      "room": "s0_room_01"
+    },
+    {
+      "from": "12a156fc9a1d47b79ed2f6fdc4804278",
+      "to": "7f21b9106a5542bbaf5136fa958bc74f",
+      "distance_m": 1.271,
+      "portal": false,
+      "room": "s0_room_01"
+    },
+    {
+      "from": "4e1abd1c99734ea0bbbadadbd83b11c7",
+      "to": "0c16424acf3c49f8906064d25a842fdd",
+      "distance_m": 1.272,
+      "portal": false,
+      "room": "s0_room_01"
+    },
+    {
+      "from": "6a4d169dca6f4e2c981044b23f589a1d",
+      "to": "df10cb83b0fd4bebb470bd02f89dc158",
+      "distance_m": 1.39,
+      "portal": false,
+      "room": "s0_room_00"
+    },
+    {
+      "from": "0c16424acf3c49f8906064d25a842fdd",
+      "to": "06836f5f6ba34703ae3f2fa860256202",
+      "distance_m": 1.428,
+      "portal": false,
+      "room": "s0_room_01"
+    },
+    {
+      "from": "2755a3399d024882b398e7c4408f1fd5",
+      "to": "374889945a2947e9a497d9c85eeba377",
+      "distance_m": 1.439,
+      "portal": false,
+      "room": "s0_room_00"
+    },
+    {
+      "from": "330b04d92caa47ac9da040cb87d26cb4",
+      "to": "4e1abd1c99734ea0bbbadadbd83b11c7",
+      "distance_m": 1.491,
+      "portal": true,
+      "opening_kind": "door",
+      "opening_plane": "wall_13"
+    },
+    {
+      "from": "4e1abd1c99734ea0bbbadadbd83b11c7",
+      "to": "06836f5f6ba34703ae3f2fa860256202",
+      "distance_m": 1.746,
+      "portal": false,
+      "room": "s0_room_01"
+    },
+    {
+      "from": "0c16424acf3c49f8906064d25a842fdd",
+      "to": "fc09197b535b435c934ba4dd890490c3",
+      "distance_m": 1.818,
+      "portal": false,
+      "room": "s0_room_01"
+    },
+    {
+      "from": "bc299055acfc411facf95e1df35e4404",
+      "to": "2755a3399d024882b398e7c4408f1fd5",
+      "distance_m": 1.902,
+      "portal": false,
+      "room": "s0_room_00"
+    },
+    {
+      "from": "fc09197b535b435c934ba4dd890490c3",
+      "to": "802dd7438db243808716cce6f89b567d",
+      "distance_m": 1.905,
+      "portal": false,
+      "room": "s0_room_01"
+    },
+    {
+      "from": "374889945a2947e9a497d9c85eeba377",
+      "to": "6a4d169dca6f4e2c981044b23f589a1d",
+      "distance_m": 1.953,
+      "portal": false,
+      "room": "s0_room_00"
+    },
+    {
+      "from": "06836f5f6ba34703ae3f2fa860256202",
+      "to": "802dd7438db243808716cce6f89b567d",
+      "distance_m": 1.966,
+      "portal": false,
+      "room": "s0_room_01"
+    },
+    {
+      "from": "7f21b9106a5542bbaf5136fa958bc74f",
+      "to": "0f5deab389c24499998bd265254d0447",
+      "distance_m": 1.981,
+      "portal": false,
+      "room": "s0_room_01"
+    },
+    {
+      "from": "374889945a2947e9a497d9c85eeba377",
+      "to": "df10cb83b0fd4bebb470bd02f89dc158",
+      "distance_m": 2.081,
+      "portal": false,
+      "room": "s0_room_00"
+    },
+    {
+      "from": "bc299055acfc411facf95e1df35e4404",
+      "to": "374889945a2947e9a497d9c85eeba377",
+      "distance_m": 2.132,
+      "portal": false,
+      "room": "s0_room_00"
+    },
+    {
+      "from": "2755a3399d024882b398e7c4408f1fd5",
+      "to": "fcf23d9fb29a42098832bd8f65d6c24f",
+      "distance_m": 2.228,
+      "portal": false,
+      "room": "s0_room_00"
+    },
+    {
+      "from": "12a156fc9a1d47b79ed2f6fdc4804278",
+      "to": "0f5deab389c24499998bd265254d0447",
+      "distance_m": 2.267,
+      "portal": false,
+      "room": "s0_room_01"
+    },
+    {
+      "from": "0c16424acf3c49f8906064d25a842fdd",
+      "to": "12a156fc9a1d47b79ed2f6fdc4804278",
+      "distance_m": 2.346,
+      "portal": false,
+      "room": "s0_room_01"
+    },
+    {
+      "from": "fc09197b535b435c934ba4dd890490c3",
+      "to": "7f21b9106a5542bbaf5136fa958bc74f",
+      "distance_m": 2.355,
+      "portal": false,
+      "room": "s0_room_01"
+    },
+    {
+      "from": "0c16424acf3c49f8906064d25a842fdd",
+      "to": "802dd7438db243808716cce6f89b567d",
+      "distance_m": 2.409,
+      "portal": false,
+      "room": "s0_room_01"
+    },
+    {
+      "from": "06836f5f6ba34703ae3f2fa860256202",
+      "to": "fc09197b535b435c934ba4dd890490c3",
+      "distance_m": 2.602,
+      "portal": false,
+      "room": "s0_room_01"
+    },
+    {
+      "from": "0ff39829bae84fe2941bc36bdf4a83c4",
+      "to": "096d46facc654cfcab975c22d5c823ff",
+      "distance_m": 2.67,
+      "portal": false,
+      "room": "exterior"
+    },
+    {
+      "from": "0c16424acf3c49f8906064d25a842fdd",
+      "to": "0f5deab389c24499998bd265254d0447",
+      "distance_m": 2.765,
+      "portal": false,
+      "room": "s0_room_01"
+    },
+    {
+      "from": "06e781d7bd2e45a5937dc47795cad24a",
+      "to": "330b04d92caa47ac9da040cb87d26cb4",
+      "distance_m": 2.916,
+      "portal": false,
+      "room": "s0_room_03"
+    },
+    {
+      "from": "802dd7438db243808716cce6f89b567d",
+      "to": "12a156fc9a1d47b79ed2f6fdc4804278",
+      "distance_m": 2.986,
+      "portal": false,
+      "room": "s0_room_01"
+    },
+    {
+      "from": "fc09197b535b435c934ba4dd890490c3",
+      "to": "0f5deab389c24499998bd265254d0447",
+      "distance_m": 2.988,
+      "portal": false,
+      "room": "s0_room_01"
+    },
+    {
+      "from": "4e1abd1c99734ea0bbbadadbd83b11c7",
+      "to": "fc09197b535b435c934ba4dd890490c3",
+      "distance_m": 3.085,
+      "portal": false,
+      "room": "s0_room_01"
+    },
+    {
+      "from": "4e1abd1c99734ea0bbbadadbd83b11c7",
+      "to": "0f5deab389c24499998bd265254d0447",
+      "distance_m": 3.149,
+      "portal": false,
+      "room": "s0_room_01"
+    },
+    {
+      "from": "0c16424acf3c49f8906064d25a842fdd",
+      "to": "7f21b9106a5542bbaf5136fa958bc74f",
+      "distance_m": 3.359,
+      "portal": false,
+      "room": "s0_room_01"
+    },
+    {
+      "from": "bc299055acfc411facf95e1df35e4404",
+      "to": "fcf23d9fb29a42098832bd8f65d6c24f",
+      "distance_m": 3.362,
+      "portal": false,
+      "room": "s0_room_00"
+    },
+    {
+      "from": "2755a3399d024882b398e7c4408f1fd5",
+      "to": "df10cb83b0fd4bebb470bd02f89dc158",
+      "distance_m": 3.375,
+      "portal": false,
+      "room": "s0_room_00"
+    },
+    {
+      "from": "2755a3399d024882b398e7c4408f1fd5",
+      "to": "6a4d169dca6f4e2c981044b23f589a1d",
+      "distance_m": 3.387,
+      "portal": false,
+      "room": "s0_room_00"
+    },
+    {
+      "from": "bc299055acfc411facf95e1df35e4404",
+      "to": "6a4d169dca6f4e2c981044b23f589a1d",
+      "distance_m": 3.402,
+      "portal": false,
+      "room": "s0_room_00"
+    },
+    {
+      "from": "4e1abd1c99734ea0bbbadadbd83b11c7",
+      "to": "802dd7438db243808716cce6f89b567d",
+      "distance_m": 3.429,
+      "portal": false,
+      "room": "s0_room_01"
+    },
+    {
+      "from": "06836f5f6ba34703ae3f2fa860256202",
+      "to": "12a156fc9a1d47b79ed2f6fdc4804278",
+      "distance_m": 3.474,
+      "portal": false,
+      "room": "s0_room_01"
+    },
+    {
+      "from": "4e1abd1c99734ea0bbbadadbd83b11c7",
+      "to": "12a156fc9a1d47b79ed2f6fdc4804278",
+      "distance_m": 3.484,
+      "portal": false,
+      "room": "s0_room_01"
+    },
+    {
+      "from": "9587353a2611473d97db87b39f7d4f6c",
+      "to": "096d46facc654cfcab975c22d5c823ff",
+      "distance_m": 3.632,
+      "portal": false,
+      "room": "exterior"
+    },
+    {
+      "from": "374889945a2947e9a497d9c85eeba377",
+      "to": "fcf23d9fb29a42098832bd8f65d6c24f",
+      "distance_m": 3.661,
+      "portal": false,
+      "room": "s0_room_00"
+    },
+    {
+      "from": "330b04d92caa47ac9da040cb87d26cb4",
+      "to": "0f5deab389c24499998bd265254d0447",
+      "distance_m": 3.8,
+      "portal": true,
+      "opening_kind": "door",
+      "opening_plane": "wall_11"
+    },
+    {
+      "from": "bc299055acfc411facf95e1df35e4404",
+      "to": "df10cb83b0fd4bebb470bd02f89dc158",
+      "distance_m": 4.095,
+      "portal": false,
+      "room": "s0_room_00"
+    },
+    {
+      "from": "06836f5f6ba34703ae3f2fa860256202",
+      "to": "0f5deab389c24499998bd265254d0447",
+      "distance_m": 4.19,
+      "portal": false,
+      "room": "s0_room_01"
+    },
+    {
+      "from": "802dd7438db243808716cce6f89b567d",
+      "to": "7f21b9106a5542bbaf5136fa958bc74f",
+      "distance_m": 4.252,
+      "portal": false,
+      "room": "s0_room_01"
+    },
+    {
+      "from": "4e1abd1c99734ea0bbbadadbd83b11c7",
+      "to": "7f21b9106a5542bbaf5136fa958bc74f",
+      "distance_m": 4.307,
+      "portal": false,
+      "room": "s0_room_01"
+    },
+    {
+      "from": "06836f5f6ba34703ae3f2fa860256202",
+      "to": "7f21b9106a5542bbaf5136fa958bc74f",
+      "distance_m": 4.634,
+      "portal": false,
+      "room": "s0_room_01"
+    },
+    {
+      "from": "802dd7438db243808716cce6f89b567d",
+      "to": "0f5deab389c24499998bd265254d0447",
+      "distance_m": 4.685,
+      "portal": false,
+      "room": "s0_room_01"
+    },
+    {
+      "from": "df10cb83b0fd4bebb470bd02f89dc158",
+      "to": "fcf23d9fb29a42098832bd8f65d6c24f",
+      "distance_m": 5.459,
+      "portal": false,
+      "room": "s0_room_00"
+    },
+    {
+      "from": "6a4d169dca6f4e2c981044b23f589a1d",
+      "to": "fcf23d9fb29a42098832bd8f65d6c24f",
+      "distance_m": 5.613,
+      "portal": false,
+      "room": "s0_room_00"
+    },
+    {
+      "from": "6a4d169dca6f4e2c981044b23f589a1d",
+      "to": "9587353a2611473d97db87b39f7d4f6c",
+      "distance_m": 7.09,
+      "portal": true,
+      "opening_kind": "door",
+      "opening_plane": "wall_25"
+    },
+    {
+      "from": "2a8604496dfa42d3916768694475c2a4",
+      "to": "9587353a2611473d97db87b39f7d4f6c",
+      "distance_m": 7.157,
+      "portal": true,
+      "opening_kind": "door",
+      "opening_plane": "wall_02"
+    }
+  ]
+}

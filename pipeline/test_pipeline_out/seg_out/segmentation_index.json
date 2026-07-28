@@ -1,0 +1,393 @@
+{
+  "schema_version": 1,
+  "classes": [
+    "other",
+    "floor",
+    "wall",
+    "ceiling",
+    "window",
+    "door",
+    "furniture"
+  ],
+  "sweep_count": 21,
+  "sweeps": [
+    {
+      "sweep_uuid": "2a8604496dfa42d3916768694475c2a4",
+      "index": 45,
+      "params": {
+        "model_name": "facebook/mask2former-swin-tiny-ade-semantic",
+        "mask_size": 640,
+        "upright": true
+      },
+      "class_fractions": {
+        "other": 0.08568603515625,
+        "floor": 0.11987263997395833,
+        "wall": 0.5858443196614583,
+        "ceiling": 0.09032185872395833,
+        "window": 0.011877848307291666,
+        "door": 0.07719075520833334,
+        "furniture": 0.02920654296875
+      }
+    },
+    {
+      "sweep_uuid": "bf73b36bb69b46d4a524bd0cf2027467",
+      "index": 46,
+      "params": {
+        "model_name": "facebook/mask2former-swin-tiny-ade-semantic",
+        "mask_size": 640,
+        "upright": true
+      },
+      "class_fractions": {
+        "other": 0.04167032877604167,
+        "floor": 0.13522989908854166,
+        "wall": 0.618841552734375,
+        "ceiling": 0.113759765625,
+        "window": 0.020708414713541668,
+        "door": 0.03999796549479167,
+        "furniture": 0.029792073567708334
+      }
+    },
+    {
+      "sweep_uuid": "bc299055acfc411facf95e1df35e4404",
+      "index": 47,
+      "params": {
+        "model_name": "facebook/mask2former-swin-tiny-ade-semantic",
+        "mask_size": 640,
+        "upright": true
+      },
+      "class_fractions": {
+        "other": 0.015623372395833333,
+        "floor": 0.11079752604166666,
+        "wall": 0.5923929850260417,
+        "ceiling": 0.15477213541666668,
+        "window": 0.020150146484375,
+        "door": 0.0452099609375,
+        "furniture": 0.061053873697916664
+      }
+    },
+    {
+      "sweep_uuid": "2755a3399d024882b398e7c4408f1fd5",
+      "index": 48,
+      "params": {
+        "model_name": "facebook/mask2former-swin-tiny-ade-semantic",
+        "mask_size": 640,
+        "upright": true
+      },
+      "class_fractions": {
+        "other": 0.017191162109375,
+        "floor": 0.2202587890625,
+        "wall": 0.434324951171875,
+        "ceiling": 0.14878580729166666,
+        "window": 0.01379150390625,
+        "door": 0.07968465169270833,
+        "furniture": 0.085963134765625
+      }
+    },
+    {
+      "sweep_uuid": "374889945a2947e9a497d9c85eeba377",
+      "index": 49,
+      "params": {
+        "model_name": "facebook/mask2former-swin-tiny-ade-semantic",
+        "mask_size": 640,
+        "upright": true
+      },
+      "class_fractions": {
+        "other": 0.033428955078125,
+        "floor": 0.21080851236979167,
+        "wall": 0.352249755859375,
+        "ceiling": 0.17590616861979166,
+        "window": 0.056305338541666666,
+        "door": 0.04897664388020833,
+        "furniture": 0.12232462565104167
+      }
+    },
+    {
+      "sweep_uuid": "6a4d169dca6f4e2c981044b23f589a1d",
+      "index": 50,
+      "params": {
+        "model_name": "facebook/mask2former-swin-tiny-ade-semantic",
+        "mask_size": 640,
+        "upright": true
+      },
+      "class_fractions": {
+        "other": 0.026609700520833335,
+        "floor": 0.051339111328125,
+        "wall": 0.38011962890625,
+        "ceiling": 0.2644600423177083,
+        "window": 0.04704752604166667,
+        "door": 0.045945231119791666,
+        "furniture": 0.184478759765625
+      }
+    },
+    {
+      "sweep_uuid": "df10cb83b0fd4bebb470bd02f89dc158",
+      "index": 51,
+      "params": {
+        "model_name": "facebook/mask2former-swin-tiny-ade-semantic",
+        "mask_size": 640,
+        "upright": true
+      },
+      "class_fractions": {
+        "other": 0.053757731119791666,
+        "floor": 0.037744140625,
+        "wall": 0.39545247395833333,
+        "ceiling": 0.20932169596354167,
+        "window": 0.08173787434895834,
+        "door": 0.032852783203125,
+        "furniture": 0.18913330078125
+      }
+    },
+    {
+      "sweep_uuid": "fcf23d9fb29a42098832bd8f65d6c24f",
+      "index": 52,
+      "params": {
+        "model_name": "facebook/mask2former-swin-tiny-ade-semantic",
+        "mask_size": 640,
+        "upright": true
+      },
+      "class_fractions": {
+        "other": 0.0447607421875,
+        "floor": 0.172354736328125,
+        "wall": 0.18886759440104167,
+        "ceiling": 0.18888264973958332,
+        "window": 0.020068359375,
+        "door": 0.239923095703125,
+        "furniture": 0.145142822265625
+      }
+    },
+    {
+      "sweep_uuid": "9587353a2611473d97db87b39f7d4f6c",
+      "index": 53,
+      "params": {
+        "model_name": "facebook/mask2former-swin-tiny-ade-semantic",
+        "mask_size": 640,
+        "upright": true
+      },
+      "class_fractions": {
+        "other": 0.07109659830729166,
+        "floor": 0.088575439453125,
+        "wall": 0.3851700846354167,
+        "ceiling": 0.17255574544270832,
+        "window": 0.016129150390625,
+        "door": 0.06440673828125,
+        "furniture": 0.20206624348958332
+      }
+    },
+    {
+      "sweep_uuid": "06e781d7bd2e45a5937dc47795cad24a",
+      "index": 54,
+      "params": {
+        "model_name": "facebook/mask2former-swin-tiny-ade-semantic",
+        "mask_size": 640,
+        "upright": true
+      },
+      "class_fractions": {
+        "other": 0.040361328125,
+        "floor": 0.149197998046875,
+        "wall": 0.1792724609375,
+        "ceiling": 0.2659785970052083,
+        "window": 0.06339070638020833,
+        "door": 0.09557698567708334,
+        "furniture": 0.206221923828125
+      }
+    },
+    {
+      "sweep_uuid": "0ff39829bae84fe2941bc36bdf4a83c4",
+      "index": 55,
+      "params": {
+        "model_name": "facebook/mask2former-swin-tiny-ade-semantic",
+        "mask_size": 640,
+        "upright": true
+      },
+      "class_fractions": {
+        "other": 0.10262410481770834,
+        "floor": 0.13368326822916668,
+        "wall": 0.3392915852864583,
+        "ceiling": 0.22161783854166667,
+        "window": 0.018356526692708333,
+        "door": 0.04700439453125,
+        "furniture": 0.13742228190104167
+      }
+    },
+    {
+      "sweep_uuid": "096d46facc654cfcab975c22d5c823ff",
+      "index": 56,
+      "params": {
+        "model_name": "facebook/mask2former-swin-tiny-ade-semantic",
+        "mask_size": 640,
+        "upright": true
+      },
+      "class_fractions": {
+        "other": 0.01952555338541667,
+        "floor": 0.11082112630208334,
+        "wall": 0.414385986328125,
+        "ceiling": 0.25822794596354165,
+        "window": 0.023239339192708333,
+        "door": 0.08766357421875,
+        "furniture": 0.086136474609375
+      }
+    },
+    {
+      "sweep_uuid": "330b04d92caa47ac9da040cb87d26cb4",
+      "index": 57,
+      "params": {
+        "model_name": "facebook/mask2former-swin-tiny-ade-semantic",
+        "mask_size": 640,
+        "upright": true
+      },
+      "class_fractions": {
+        "other": 0.031839599609375,
+        "floor": 0.104610595703125,
+        "wall": 0.2636564127604167,
+        "ceiling": 0.261942138671875,
+        "window": 0.0790966796875,
+        "door": 0.06460530598958333,
+        "furniture": 0.194249267578125
+      }
+    },
+    {
+      "sweep_uuid": "4e1abd1c99734ea0bbbadadbd83b11c7",
+      "index": 58,
+      "params": {
+        "model_name": "facebook/mask2former-swin-tiny-ade-semantic",
+        "mask_size": 640,
+        "upright": true
+      },
+      "class_fractions": {
+        "other": 0.033084716796875,
+        "floor": 0.054900716145833334,
+        "wall": 0.35254069010416667,
+        "ceiling": 0.20085611979166668,
+        "window": 0.03505818684895833,
+        "door": 0.16533203125,
+        "furniture": 0.1582275390625
+      }
+    },
+    {
+      "sweep_uuid": "0c16424acf3c49f8906064d25a842fdd",
+      "index": 59,
+      "params": {
+        "model_name": "facebook/mask2former-swin-tiny-ade-semantic",
+        "mask_size": 640,
+        "upright": true
+      },
+      "class_fractions": {
+        "other": 0.043197021484375,
+        "floor": 0.115517578125,
+        "wall": 0.28904866536458335,
+        "ceiling": 0.2662740071614583,
+        "window": 0.04775634765625,
+        "door": 0.057110595703125,
+        "furniture": 0.18109578450520833
+      }
+    },
+    {
+      "sweep_uuid": "06836f5f6ba34703ae3f2fa860256202",
+      "index": 60,
+      "params": {
+        "model_name": "facebook/mask2former-swin-tiny-ade-semantic",
+        "mask_size": 640,
+        "upright": true
+      },
+      "class_fractions": {
+        "other": 0.075025634765625,
+        "floor": 0.066939697265625,
+        "wall": 0.4192122395833333,
+        "ceiling": 0.21890665690104166,
+        "window": 0.09973347981770833,
+        "door": 0.006322428385416667,
+        "furniture": 0.11385986328125
+      }
+    },
+    {
+      "sweep_uuid": "fc09197b535b435c934ba4dd890490c3",
+      "index": 61,
+      "params": {
+        "model_name": "facebook/mask2former-swin-tiny-ade-semantic",
+        "mask_size": 640,
+        "upright": true
+      },
+      "class_fractions": {
+        "other": 0.020631917317708335,
+        "floor": 0.067366943359375,
+        "wall": 0.2791267903645833,
+        "ceiling": 0.27487101236979167,
+        "window": 0.029866943359375,
+        "door": 0.022218831380208335,
+        "furniture": 0.30591756184895835
+      }
+    },
+    {
+      "sweep_uuid": "802dd7438db243808716cce6f89b567d",
+      "index": 62,
+      "params": {
+        "model_name": "facebook/mask2former-swin-tiny-ade-semantic",
+        "mask_size": 640,
+        "upright": true
+      },
+      "class_fractions": {
+        "other": 0.03772786458333333,
+        "floor": 0.0264697265625,
+        "wall": 0.49066243489583333,
+        "ceiling": 0.09555826822916667,
+        "window": 0.080313720703125,
+        "door": 0.08587239583333334,
+        "furniture": 0.18339558919270835
+      }
+    },
+    {
+      "sweep_uuid": "12a156fc9a1d47b79ed2f6fdc4804278",
+      "index": 63,
+      "params": {
+        "model_name": "facebook/mask2former-swin-tiny-ade-semantic",
+        "mask_size": 640,
+        "upright": true
+      },
+      "class_fractions": {
+        "other": 0.008801676432291667,
+        "floor": 0.06634602864583333,
+        "wall": 0.37902913411458333,
+        "ceiling": 0.13271199544270834,
+        "window": 0.0111865234375,
+        "door": 0.011182861328125,
+        "furniture": 0.3907417805989583
+      }
+    },
+    {
+      "sweep_uuid": "7f21b9106a5542bbaf5136fa958bc74f",
+      "index": 64,
+      "params": {
+        "model_name": "facebook/mask2former-swin-tiny-ade-semantic",
+        "mask_size": 640,
+        "upright": true
+      },
+      "class_fractions": {
+        "other": 0.0076200358072916665,
+        "floor": 0.073074951171875,
+        "wall": 0.20449259440104167,
+        "ceiling": 0.23266845703125,
+        "window": 0.016274820963541665,
+        "door": 0.03829182942708333,
+        "furniture": 0.42757731119791664
+      }
+    },
+    {
+      "sweep_uuid": "0f5deab389c24499998bd265254d0447",
+      "index": 65,
+      "params": {
+        "model_name": "facebook/mask2former-swin-tiny-ade-semantic",
+        "mask_size": 640,
+        "upright": true
+      },
+      "class_fractions": {
+        "other": 0.013006998697916666,
+        "floor": 0.04753133138020833,
+        "wall": 0.28713785807291664,
+        "ceiling": 0.25355875651041665,
+        "window": 0.006398111979166667,
+        "door": 0.13946126302083334,
+        "furniture": 0.25290568033854166
+      }
+    }
+  ]
+}

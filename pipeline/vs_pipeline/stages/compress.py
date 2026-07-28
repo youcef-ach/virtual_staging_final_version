@@ -76,6 +76,7 @@ def publish_property(property_dir: Path, output_dir: Path) -> None:
     """Execute the compress & publish stage."""
     start_t = time.monotonic()
 
+    output_dir.mkdir(parents=True, exist_ok=True)
     proxy_dir = property_dir / "proxy_out"
     details_dir = property_dir / "details_out"
     env_dir = property_dir / "env_out"
@@ -177,7 +178,6 @@ def publish_property(property_dir: Path, output_dir: Path) -> None:
             logger.info("Updated and published panorama manifest")
 
     # Write local manifest
-    output_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = output_dir / "published_manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2))
 

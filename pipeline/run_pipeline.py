@@ -41,19 +41,25 @@ def main():
     # 5. Planes
     run_stage(f"py -3.11 -m vs_pipeline.stages.planes fit --cache {prop}/preprocessed/sweep_cache -o {prop}/planes_out --poses {prop}/poses.json")
     
+    # 5.5 Rooms
+    run_stage(f"py -3.11 -m vs_pipeline.stages.rooms build --planes {prop}/planes_out/structural_planes.json --poses {prop}/poses.json -o {prop}/planes_out")
+    
+    # 5.7 Openings
+    run_stage(f"py -3.11 -m vs_pipeline.stages.openings detect --planes {prop}/planes_out/structural_planes.json -o {prop}/planes_out/openings.json")
+    
     # 6. Proxy
     proxy_out = prop / "proxy_out"
     proxy_out.mkdir(parents=True, exist_ok=True)
-    run_stage(f"py -3.11 -m vs_pipeline.stages.proxy build --rooms {prop}/planes_out/rooms.json -o {proxy_out}")
+    run_stage(f"py -3.11 -m vs_pipeline.stages.proxy build --rooms {prop}/planes_out/rooms.json --openings {prop}/planes_out/openings.json -o {proxy_out}")
     
     # 7. G-Buffer
-    run_stage(f"py -3.11 -m vs_pipeline.stages.gbuffer --poses {prop}/poses.json --mesh {proxy_out}/proxy_shell.glb -o {prop}/gbuffer_renders")
+    run_stage(f"py -3.11 -m vs_pipeline.stages.gbuffer prepare {prop}/poses.json -o {prop}/gbuffer_jobs.json")
     
     # 8. IBL
-    run_stage(f"py -3.11 -m vs_pipeline.stages.ibl --panos {prop}/extracted_cubemaps -o {prop}/env_out")
+    run_stage(f"py -3.11 -m vs_pipeline.stages.ibl bake --panos {prop}/extracted_cubemaps -o {prop}/env_out")
     
     # 9. Navigation
-    run_stage(f"py -3.11 -m vs_pipeline.stages.navigation --poses {prop}/poses.json --rooms {prop}/planes_out/rooms.json -o {prop}/nav_out")
+    run_stage(f"py -3.11 -m vs_pipeline.stages.navigation build --poses {prop}/poses.json --rooms {prop}/planes_out/rooms.json --openings {prop}/planes_out/openings.json -o {prop}/nav_out")
     
     # 10. Compress & Publish
     # Note: I modified compress.py to expect property_dir structure.

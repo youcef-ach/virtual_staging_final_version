@@ -1,0 +1,1029 @@
+{
+  "schema_version": 1,
+  "engine": "numpy-v1 (cmft drop-in seam: vs_pipeline.stages.ibl.Convolver)",
+  "face_order": [
+    "px",
+    "nx",
+    "py",
+    "ny",
+    "pz",
+    "nz"
+  ],
+  "boost_modes": {
+    "blind": {
+      "mode": "blind",
+      "knee": 0.85,
+      "strength": 12.0,
+      "power": 1.5,
+      "note": "fallback when no segmentation masks exist for the sweep"
+    },
+    "seg_guided": {
+      "mode": "seg_guided",
+      "knee": 0.7,
+      "strength": 24.0,
+      "power": 1.5,
+      "max_factor": 6.0,
+      "feather_px": 3,
+      "window_class_id": 4,
+      "emissive_ade_ids": [
+        2,
+        8,
+        36,
+        82,
+        85,
+        87,
+        134
+      ]
+    }
+  },
+  "sweep_count": 21,
+  "sweeps": [
+    {
+      "sweep_uuid": "2a8604496dfa42d3916768694475c2a4",
+      "index": 45,
+      "irradiance": "2a8604496dfa42d3916768694475c2a4/irradiance.npy",
+      "specular_mips": [
+        "2a8604496dfa42d3916768694475c2a4/specular_mip0.npy",
+        "2a8604496dfa42d3916768694475c2a4/specular_mip1.npy",
+        "2a8604496dfa42d3916768694475c2a4/specular_mip2.npy",
+        "2a8604496dfa42d3916768694475c2a4/specular_mip3.npy",
+        "2a8604496dfa42d3916768694475c2a4/specular_mip4.npy"
+      ],
+      "roughness_per_mip": [
+        0.0,
+        0.25,
+        0.5,
+        0.75,
+        1.0
+      ],
+      "params": {
+        "diffuse_size": 64,
+        "irr_source_size": 32,
+        "spec_size": 256,
+        "spec_mips": 5
+      },
+      "boost": {
+        "mode": "blind",
+        "knee": 0.85,
+        "strength": 12.0,
+        "power": 1.5,
+        "note": "fallback when no segmentation masks exist for the sweep"
+      },
+      "stats": {
+        "finite": true,
+        "boost_mode": "blind",
+        "boost_pixel_fraction": 0.010162591934204102,
+        "boost_max_factor": 1.6971368789672852,
+        "env_base_mean_luma": 0.512280285358429,
+        "irradiance_mean_luma": 0.5114152431488037,
+        "mip_mean_luma": [
+          0.5122802257537842,
+          0.5122117400169373,
+          0.5116353034973145,
+          0.511374294757843,
+          0.5112947821617126
+        ]
+      }
+    },
+    {
+      "sweep_uuid": "bf73b36bb69b46d4a524bd0cf2027467",
+      "index": 46,
+      "irradiance": "bf73b36bb69b46d4a524bd0cf2027467/irradiance.npy",
+      "specular_mips": [
+        "bf73b36bb69b46d4a524bd0cf2027467/specular_mip0.npy",
+        "bf73b36bb69b46d4a524bd0cf2027467/specular_mip1.npy",
+        "bf73b36bb69b46d4a524bd0cf2027467/specular_mip2.npy",
+        "bf73b36bb69b46d4a524bd0cf2027467/specular_mip3.npy",
+        "bf73b36bb69b46d4a524bd0cf2027467/specular_mip4.npy"
+      ],
+      "roughness_per_mip": [
+        0.0,
+        0.25,
+        0.5,
+        0.75,
+        1.0
+      ],
+      "params": {
+        "diffuse_size": 64,
+        "irr_source_size": 32,
+        "spec_size": 256,
+        "spec_mips": 5
+      },
+      "boost": {
+        "mode": "blind",
+        "knee": 0.85,
+        "strength": 12.0,
+        "power": 1.5,
+        "note": "fallback when no segmentation masks exist for the sweep"
+      },
+      "stats": {
+        "finite": true,
+        "boost_mode": "blind",
+        "boost_pixel_fraction": 0.006300896406173706,
+        "boost_max_factor": 1.6971368789672852,
+        "env_base_mean_luma": 0.5120012760162354,
+        "irradiance_mean_luma": 0.5076149702072144,
+        "mip_mean_luma": [
+          0.5120012760162354,
+          0.511517345905304,
+          0.5094876289367676,
+          0.5079427361488342,
+          0.5074949860572815
+        ]
+      }
+    },
+    {
+      "sweep_uuid": "bc299055acfc411facf95e1df35e4404",
+      "index": 47,
+      "irradiance": "bc299055acfc411facf95e1df35e4404/irradiance.npy",
+      "specular_mips": [
+        "bc299055acfc411facf95e1df35e4404/specular_mip0.npy",
+        "bc299055acfc411facf95e1df35e4404/specular_mip1.npy",
+        "bc299055acfc411facf95e1df35e4404/specular_mip2.npy",
+        "bc299055acfc411facf95e1df35e4404/specular_mip3.npy",
+        "bc299055acfc411facf95e1df35e4404/specular_mip4.npy"
+      ],
+      "roughness_per_mip": [
+        0.0,
+        0.25,
+        0.5,
+        0.75,
+        1.0
+      ],
+      "params": {
+        "diffuse_size": 64,
+        "irr_source_size": 32,
+        "spec_size": 256,
+        "spec_mips": 5
+      },
+      "boost": {
+        "mode": "blind",
+        "knee": 0.85,
+        "strength": 12.0,
+        "power": 1.5,
+        "note": "fallback when no segmentation masks exist for the sweep"
+      },
+      "stats": {
+        "finite": true,
+        "boost_mode": "blind",
+        "boost_pixel_fraction": 0.006787131230036418,
+        "boost_max_factor": 1.6971368789672852,
+        "env_base_mean_luma": 0.4978206157684326,
+        "irradiance_mean_luma": 0.49352574348449707,
+        "mip_mean_luma": [
+          0.497820645570755,
+          0.4964926242828369,
+          0.4943585693836212,
+          0.493584007024765,
+          0.4934097230434418
+        ]
+      }
+    },
+    {
+      "sweep_uuid": "2755a3399d024882b398e7c4408f1fd5",
+      "index": 48,
+      "irradiance": "2755a3399d024882b398e7c4408f1fd5/irradiance.npy",
+      "specular_mips": [
+        "2755a3399d024882b398e7c4408f1fd5/specular_mip0.npy",
+        "2755a3399d024882b398e7c4408f1fd5/specular_mip1.npy",
+        "2755a3399d024882b398e7c4408f1fd5/specular_mip2.npy",
+        "2755a3399d024882b398e7c4408f1fd5/specular_mip3.npy",
+        "2755a3399d024882b398e7c4408f1fd5/specular_mip4.npy"
+      ],
+      "roughness_per_mip": [
+        0.0,
+        0.25,
+        0.5,
+        0.75,
+        1.0
+      ],
+      "params": {
+        "diffuse_size": 64,
+        "irr_source_size": 32,
+        "spec_size": 256,
+        "spec_mips": 5
+      },
+      "boost": {
+        "mode": "blind",
+        "knee": 0.85,
+        "strength": 12.0,
+        "power": 1.5,
+        "note": "fallback when no segmentation masks exist for the sweep"
+      },
+      "stats": {
+        "finite": true,
+        "boost_mode": "blind",
+        "boost_pixel_fraction": 0.012947529554367065,
+        "boost_max_factor": 1.6971368789672852,
+        "env_base_mean_luma": 0.4985372722148895,
+        "irradiance_mean_luma": 0.5093771815299988,
+        "mip_mean_luma": [
+          0.4985372722148895,
+          0.5011060237884521,
+          0.5066612362861633,
+          0.5087847113609314,
+          0.5092572569847107
+        ]
+      }
+    },
+    {
+      "sweep_uuid": "374889945a2947e9a497d9c85eeba377",
+      "index": 49,
+      "irradiance": "374889945a2947e9a497d9c85eeba377/irradiance.npy",
+      "specular_mips": [
+        "374889945a2947e9a497d9c85eeba377/specular_mip0.npy",
+        "374889945a2947e9a497d9c85eeba377/specular_mip1.npy",
+        "374889945a2947e9a497d9c85eeba377/specular_mip2.npy",
+        "374889945a2947e9a497d9c85eeba377/specular_mip3.npy",
+        "374889945a2947e9a497d9c85eeba377/specular_mip4.npy"
+      ],
+      "roughness_per_mip": [
+        0.0,
+        0.25,
+        0.5,
+        0.75,
+        1.0
+      ],
+      "params": {
+        "diffuse_size": 64,
+        "irr_source_size": 32,
+        "spec_size": 256,
+        "spec_mips": 5
+      },
+      "boost": {
+        "mode": "blind",
+        "knee": 0.85,
+        "strength": 12.0,
+        "power": 1.5,
+        "note": "fallback when no segmentation masks exist for the sweep"
+      },
+      "stats": {
+        "finite": true,
+        "boost_mode": "blind",
+        "boost_pixel_fraction": 0.011518319447835287,
+        "boost_max_factor": 1.6971368789672852,
+        "env_base_mean_luma": 0.49982383847236633,
+        "irradiance_mean_luma": 0.5012251734733582,
+        "mip_mean_luma": [
+          0.49982380867004395,
+          0.4999955892562866,
+          0.500734269618988,
+          0.5010384917259216,
+          0.5011072754859924
+        ]
+      }
+    },
+    {
+      "sweep_uuid": "6a4d169dca6f4e2c981044b23f589a1d",
+      "index": 50,
+      "irradiance": "6a4d169dca6f4e2c981044b23f589a1d/irradiance.npy",
+      "specular_mips": [
+        "6a4d169dca6f4e2c981044b23f589a1d/specular_mip0.npy",
+        "6a4d169dca6f4e2c981044b23f589a1d/specular_mip1.npy",
+        "6a4d169dca6f4e2c981044b23f589a1d/specular_mip2.npy",
+        "6a4d169dca6f4e2c981044b23f589a1d/specular_mip3.npy",
+        "6a4d169dca6f4e2c981044b23f589a1d/specular_mip4.npy"
+      ],
+      "roughness_per_mip": [
+        0.0,
+        0.25,
+        0.5,
+        0.75,
+        1.0
+      ],
+      "params": {
+        "diffuse_size": 64,
+        "irr_source_size": 32,
+        "spec_size": 256,
+        "spec_mips": 5
+      },
+      "boost": {
+        "mode": "blind",
+        "knee": 0.85,
+        "strength": 12.0,
+        "power": 1.5,
+        "note": "fallback when no segmentation masks exist for the sweep"
+      },
+      "stats": {
+        "finite": true,
+        "boost_mode": "blind",
+        "boost_pixel_fraction": 0.01294932762781779,
+        "boost_max_factor": 1.6971368789672852,
+        "env_base_mean_luma": 0.4998217523097992,
+        "irradiance_mean_luma": 0.5031848549842834,
+        "mip_mean_luma": [
+          0.4998217523097992,
+          0.5004858374595642,
+          0.5019704699516296,
+          0.5028217434883118,
+          0.5030667185783386
+        ]
+      }
+    },
+    {
+      "sweep_uuid": "df10cb83b0fd4bebb470bd02f89dc158",
+      "index": 51,
+      "irradiance": "df10cb83b0fd4bebb470bd02f89dc158/irradiance.npy",
+      "specular_mips": [
+        "df10cb83b0fd4bebb470bd02f89dc158/specular_mip0.npy",
+        "df10cb83b0fd4bebb470bd02f89dc158/specular_mip1.npy",
+        "df10cb83b0fd4bebb470bd02f89dc158/specular_mip2.npy",
+        "df10cb83b0fd4bebb470bd02f89dc158/specular_mip3.npy",
+        "df10cb83b0fd4bebb470bd02f89dc158/specular_mip4.npy"
+      ],
+      "roughness_per_mip": [
+        0.0,
+        0.25,
+        0.5,
+        0.75,
+        1.0
+      ],
+      "params": {
+        "diffuse_size": 64,
+        "irr_source_size": 32,
+        "spec_size": 256,
+        "spec_mips": 5
+      },
+      "boost": {
+        "mode": "blind",
+        "knee": 0.85,
+        "strength": 12.0,
+        "power": 1.5,
+        "note": "fallback when no segmentation masks exist for the sweep"
+      },
+      "stats": {
+        "finite": true,
+        "boost_mode": "blind",
+        "boost_pixel_fraction": 0.010764777660369873,
+        "boost_max_factor": 1.6971368789672852,
+        "env_base_mean_luma": 0.49427375197410583,
+        "irradiance_mean_luma": 0.4973929822444916,
+        "mip_mean_luma": [
+          0.49427375197410583,
+          0.49515199661254883,
+          0.49681198596954346,
+          0.4972311556339264,
+          0.4972756803035736
+        ]
+      }
+    },
+    {
+      "sweep_uuid": "fcf23d9fb29a42098832bd8f65d6c24f",
+      "index": 52,
+      "irradiance": "fcf23d9fb29a42098832bd8f65d6c24f/irradiance.npy",
+      "specular_mips": [
+        "fcf23d9fb29a42098832bd8f65d6c24f/specular_mip0.npy",
+        "fcf23d9fb29a42098832bd8f65d6c24f/specular_mip1.npy",
+        "fcf23d9fb29a42098832bd8f65d6c24f/specular_mip2.npy",
+        "fcf23d9fb29a42098832bd8f65d6c24f/specular_mip3.npy",
+        "fcf23d9fb29a42098832bd8f65d6c24f/specular_mip4.npy"
+      ],
+      "roughness_per_mip": [
+        0.0,
+        0.25,
+        0.5,
+        0.75,
+        1.0
+      ],
+      "params": {
+        "diffuse_size": 64,
+        "irr_source_size": 32,
+        "spec_size": 256,
+        "spec_mips": 5
+      },
+      "boost": {
+        "mode": "blind",
+        "knee": 0.85,
+        "strength": 12.0,
+        "power": 1.5,
+        "note": "fallback when no segmentation masks exist for the sweep"
+      },
+      "stats": {
+        "finite": true,
+        "boost_mode": "blind",
+        "boost_pixel_fraction": 0.006186227003733317,
+        "boost_max_factor": 1.6971368789672852,
+        "env_base_mean_luma": 0.5134826302528381,
+        "irradiance_mean_luma": 0.5090048909187317,
+        "mip_mean_luma": [
+          0.5134826302528381,
+          0.5122389197349548,
+          0.5100019574165344,
+          0.5091138482093811,
+          0.5088849663734436
+        ]
+      }
+    },
+    {
+      "sweep_uuid": "9587353a2611473d97db87b39f7d4f6c",
+      "index": 53,
+      "irradiance": "9587353a2611473d97db87b39f7d4f6c/irradiance.npy",
+      "specular_mips": [
+        "9587353a2611473d97db87b39f7d4f6c/specular_mip0.npy",
+        "9587353a2611473d97db87b39f7d4f6c/specular_mip1.npy",
+        "9587353a2611473d97db87b39f7d4f6c/specular_mip2.npy",
+        "9587353a2611473d97db87b39f7d4f6c/specular_mip3.npy",
+        "9587353a2611473d97db87b39f7d4f6c/specular_mip4.npy"
+      ],
+      "roughness_per_mip": [
+        0.0,
+        0.25,
+        0.5,
+        0.75,
+        1.0
+      ],
+      "params": {
+        "diffuse_size": 64,
+        "irr_source_size": 32,
+        "spec_size": 256,
+        "spec_mips": 5
+      },
+      "boost": {
+        "mode": "blind",
+        "knee": 0.85,
+        "strength": 12.0,
+        "power": 1.5,
+        "note": "fallback when no segmentation masks exist for the sweep"
+      },
+      "stats": {
+        "finite": true,
+        "boost_mode": "blind",
+        "boost_pixel_fraction": 0.01249826947848002,
+        "boost_max_factor": 1.6971368789672852,
+        "env_base_mean_luma": 0.511955738067627,
+        "irradiance_mean_luma": 0.5053181052207947,
+        "mip_mean_luma": [
+          0.511955738067627,
+          0.5110307931900024,
+          0.5077514052391052,
+          0.5057358741760254,
+          0.5051987767219543
+        ]
+      }
+    },
+    {
+      "sweep_uuid": "06e781d7bd2e45a5937dc47795cad24a",
+      "index": 54,
+      "irradiance": "06e781d7bd2e45a5937dc47795cad24a/irradiance.npy",
+      "specular_mips": [
+        "06e781d7bd2e45a5937dc47795cad24a/specular_mip0.npy",
+        "06e781d7bd2e45a5937dc47795cad24a/specular_mip1.npy",
+        "06e781d7bd2e45a5937dc47795cad24a/specular_mip2.npy",
+        "06e781d7bd2e45a5937dc47795cad24a/specular_mip3.npy",
+        "06e781d7bd2e45a5937dc47795cad24a/specular_mip4.npy"
+      ],
+      "roughness_per_mip": [
+        0.0,
+        0.25,
+        0.5,
+        0.75,
+        1.0
+      ],
+      "params": {
+        "diffuse_size": 64,
+        "irr_source_size": 32,
+        "spec_size": 256,
+        "spec_mips": 5
+      },
+      "boost": {
+        "mode": "blind",
+        "knee": 0.85,
+        "strength": 12.0,
+        "power": 1.5,
+        "note": "fallback when no segmentation masks exist for the sweep"
+      },
+      "stats": {
+        "finite": true,
+        "boost_mode": "blind",
+        "boost_pixel_fraction": 0.021478623151779175,
+        "boost_max_factor": 1.6971368789672852,
+        "env_base_mean_luma": 0.5205720067024231,
+        "irradiance_mean_luma": 0.518653154373169,
+        "mip_mean_luma": [
+          0.5205720067024231,
+          0.5197194218635559,
+          0.5186025500297546,
+          0.5185019373893738,
+          0.5185314416885376
+        ]
+      }
+    },
+    {
+      "sweep_uuid": "0ff39829bae84fe2941bc36bdf4a83c4",
+      "index": 55,
+      "irradiance": "0ff39829bae84fe2941bc36bdf4a83c4/irradiance.npy",
+      "specular_mips": [
+        "0ff39829bae84fe2941bc36bdf4a83c4/specular_mip0.npy",
+        "0ff39829bae84fe2941bc36bdf4a83c4/specular_mip1.npy",
+        "0ff39829bae84fe2941bc36bdf4a83c4/specular_mip2.npy",
+        "0ff39829bae84fe2941bc36bdf4a83c4/specular_mip3.npy",
+        "0ff39829bae84fe2941bc36bdf4a83c4/specular_mip4.npy"
+      ],
+      "roughness_per_mip": [
+        0.0,
+        0.25,
+        0.5,
+        0.75,
+        1.0
+      ],
+      "params": {
+        "diffuse_size": 64,
+        "irr_source_size": 32,
+        "spec_size": 256,
+        "spec_mips": 5
+      },
+      "boost": {
+        "mode": "blind",
+        "knee": 0.85,
+        "strength": 12.0,
+        "power": 1.5,
+        "note": "fallback when no segmentation masks exist for the sweep"
+      },
+      "stats": {
+        "finite": true,
+        "boost_mode": "blind",
+        "boost_pixel_fraction": 0.012790262699127197,
+        "boost_max_factor": 1.6971368789672852,
+        "env_base_mean_luma": 0.516485333442688,
+        "irradiance_mean_luma": 0.509484589099884,
+        "mip_mean_luma": [
+          0.516485333442688,
+          0.5152294039726257,
+          0.5115463137626648,
+          0.5097795128822327,
+          0.509364664554596
+        ]
+      }
+    },
+    {
+      "sweep_uuid": "096d46facc654cfcab975c22d5c823ff",
+      "index": 56,
+      "irradiance": "096d46facc654cfcab975c22d5c823ff/irradiance.npy",
+      "specular_mips": [
+        "096d46facc654cfcab975c22d5c823ff/specular_mip0.npy",
+        "096d46facc654cfcab975c22d5c823ff/specular_mip1.npy",
+        "096d46facc654cfcab975c22d5c823ff/specular_mip2.npy",
+        "096d46facc654cfcab975c22d5c823ff/specular_mip3.npy",
+        "096d46facc654cfcab975c22d5c823ff/specular_mip4.npy"
+      ],
+      "roughness_per_mip": [
+        0.0,
+        0.25,
+        0.5,
+        0.75,
+        1.0
+      ],
+      "params": {
+        "diffuse_size": 64,
+        "irr_source_size": 32,
+        "spec_size": 256,
+        "spec_mips": 5
+      },
+      "boost": {
+        "mode": "blind",
+        "knee": 0.85,
+        "strength": 12.0,
+        "power": 1.5,
+        "note": "fallback when no segmentation masks exist for the sweep"
+      },
+      "stats": {
+        "finite": true,
+        "boost_mode": "blind",
+        "boost_pixel_fraction": 0.004814366499582927,
+        "boost_max_factor": 1.6971368789672852,
+        "env_base_mean_luma": 0.5102038979530334,
+        "irradiance_mean_luma": 0.5193257927894592,
+        "mip_mean_luma": [
+          0.510204017162323,
+          0.5111435055732727,
+          0.5157518982887268,
+          0.5185262560844421,
+          0.5192037224769592
+        ]
+      }
+    },
+    {
+      "sweep_uuid": "330b04d92caa47ac9da040cb87d26cb4",
+      "index": 57,
+      "irradiance": "330b04d92caa47ac9da040cb87d26cb4/irradiance.npy",
+      "specular_mips": [
+        "330b04d92caa47ac9da040cb87d26cb4/specular_mip0.npy",
+        "330b04d92caa47ac9da040cb87d26cb4/specular_mip1.npy",
+        "330b04d92caa47ac9da040cb87d26cb4/specular_mip2.npy",
+        "330b04d92caa47ac9da040cb87d26cb4/specular_mip3.npy",
+        "330b04d92caa47ac9da040cb87d26cb4/specular_mip4.npy"
+      ],
+      "roughness_per_mip": [
+        0.0,
+        0.25,
+        0.5,
+        0.75,
+        1.0
+      ],
+      "params": {
+        "diffuse_size": 64,
+        "irr_source_size": 32,
+        "spec_size": 256,
+        "spec_mips": 5
+      },
+      "boost": {
+        "mode": "blind",
+        "knee": 0.85,
+        "strength": 12.0,
+        "power": 1.5,
+        "note": "fallback when no segmentation masks exist for the sweep"
+      },
+      "stats": {
+        "finite": true,
+        "boost_mode": "blind",
+        "boost_pixel_fraction": 0.02054467797279358,
+        "boost_max_factor": 1.6971368789672852,
+        "env_base_mean_luma": 0.5245911478996277,
+        "irradiance_mean_luma": 0.524080216884613,
+        "mip_mean_luma": [
+          0.5245912075042725,
+          0.5238178968429565,
+          0.5237069129943848,
+          0.5239109396934509,
+          0.5239570140838623
+        ]
+      }
+    },
+    {
+      "sweep_uuid": "4e1abd1c99734ea0bbbadadbd83b11c7",
+      "index": 58,
+      "irradiance": "4e1abd1c99734ea0bbbadadbd83b11c7/irradiance.npy",
+      "specular_mips": [
+        "4e1abd1c99734ea0bbbadadbd83b11c7/specular_mip0.npy",
+        "4e1abd1c99734ea0bbbadadbd83b11c7/specular_mip1.npy",
+        "4e1abd1c99734ea0bbbadadbd83b11c7/specular_mip2.npy",
+        "4e1abd1c99734ea0bbbadadbd83b11c7/specular_mip3.npy",
+        "4e1abd1c99734ea0bbbadadbd83b11c7/specular_mip4.npy"
+      ],
+      "roughness_per_mip": [
+        0.0,
+        0.25,
+        0.5,
+        0.75,
+        1.0
+      ],
+      "params": {
+        "diffuse_size": 64,
+        "irr_source_size": 32,
+        "spec_size": 256,
+        "spec_mips": 5
+      },
+      "boost": {
+        "mode": "blind",
+        "knee": 0.85,
+        "strength": 12.0,
+        "power": 1.5,
+        "note": "fallback when no segmentation masks exist for the sweep"
+      },
+      "stats": {
+        "finite": true,
+        "boost_mode": "blind",
+        "boost_pixel_fraction": 0.013135015964508057,
+        "boost_max_factor": 1.6971368789672852,
+        "env_base_mean_luma": 0.5008931159973145,
+        "irradiance_mean_luma": 0.4946483075618744,
+        "mip_mean_luma": [
+          0.5008931756019592,
+          0.4993254840373993,
+          0.49624767899513245,
+          0.4949028193950653,
+          0.4945314824581146
+        ]
+      }
+    },
+    {
+      "sweep_uuid": "0c16424acf3c49f8906064d25a842fdd",
+      "index": 59,
+      "irradiance": "0c16424acf3c49f8906064d25a842fdd/irradiance.npy",
+      "specular_mips": [
+        "0c16424acf3c49f8906064d25a842fdd/specular_mip0.npy",
+        "0c16424acf3c49f8906064d25a842fdd/specular_mip1.npy",
+        "0c16424acf3c49f8906064d25a842fdd/specular_mip2.npy",
+        "0c16424acf3c49f8906064d25a842fdd/specular_mip3.npy",
+        "0c16424acf3c49f8906064d25a842fdd/specular_mip4.npy"
+      ],
+      "roughness_per_mip": [
+        0.0,
+        0.25,
+        0.5,
+        0.75,
+        1.0
+      ],
+      "params": {
+        "diffuse_size": 64,
+        "irr_source_size": 32,
+        "spec_size": 256,
+        "spec_mips": 5
+      },
+      "boost": {
+        "mode": "blind",
+        "knee": 0.85,
+        "strength": 12.0,
+        "power": 1.5,
+        "note": "fallback when no segmentation masks exist for the sweep"
+      },
+      "stats": {
+        "finite": true,
+        "boost_mode": "blind",
+        "boost_pixel_fraction": 0.015982707341512043,
+        "boost_max_factor": 1.6971368789672852,
+        "env_base_mean_luma": 0.48998475074768066,
+        "irradiance_mean_luma": 0.4846530854701996,
+        "mip_mean_luma": [
+          0.48998475074768066,
+          0.48880842328071594,
+          0.48594287037849426,
+          0.4847792685031891,
+          0.4845391809940338
+        ]
+      }
+    },
+    {
+      "sweep_uuid": "06836f5f6ba34703ae3f2fa860256202",
+      "index": 60,
+      "irradiance": "06836f5f6ba34703ae3f2fa860256202/irradiance.npy",
+      "specular_mips": [
+        "06836f5f6ba34703ae3f2fa860256202/specular_mip0.npy",
+        "06836f5f6ba34703ae3f2fa860256202/specular_mip1.npy",
+        "06836f5f6ba34703ae3f2fa860256202/specular_mip2.npy",
+        "06836f5f6ba34703ae3f2fa860256202/specular_mip3.npy",
+        "06836f5f6ba34703ae3f2fa860256202/specular_mip4.npy"
+      ],
+      "roughness_per_mip": [
+        0.0,
+        0.25,
+        0.5,
+        0.75,
+        1.0
+      ],
+      "params": {
+        "diffuse_size": 64,
+        "irr_source_size": 32,
+        "spec_size": 256,
+        "spec_mips": 5
+      },
+      "boost": {
+        "mode": "blind",
+        "knee": 0.85,
+        "strength": 12.0,
+        "power": 1.5,
+        "note": "fallback when no segmentation masks exist for the sweep"
+      },
+      "stats": {
+        "finite": true,
+        "boost_mode": "blind",
+        "boost_pixel_fraction": 0.044962296883265175,
+        "boost_max_factor": 1.6971368789672852,
+        "env_base_mean_luma": 0.5363081097602844,
+        "irradiance_mean_luma": 0.5365276336669922,
+        "mip_mean_luma": [
+          0.5363081097602844,
+          0.5370921492576599,
+          0.5370497107505798,
+          0.5365715026855469,
+          0.5364008545875549
+        ]
+      }
+    },
+    {
+      "sweep_uuid": "fc09197b535b435c934ba4dd890490c3",
+      "index": 61,
+      "irradiance": "fc09197b535b435c934ba4dd890490c3/irradiance.npy",
+      "specular_mips": [
+        "fc09197b535b435c934ba4dd890490c3/specular_mip0.npy",
+        "fc09197b535b435c934ba4dd890490c3/specular_mip1.npy",
+        "fc09197b535b435c934ba4dd890490c3/specular_mip2.npy",
+        "fc09197b535b435c934ba4dd890490c3/specular_mip3.npy",
+        "fc09197b535b435c934ba4dd890490c3/specular_mip4.npy"
+      ],
+      "roughness_per_mip": [
+        0.0,
+        0.25,
+        0.5,
+        0.75,
+        1.0
+      ],
+      "params": {
+        "diffuse_size": 64,
+        "irr_source_size": 32,
+        "spec_size": 256,
+        "spec_mips": 5
+      },
+      "boost": {
+        "mode": "blind",
+        "knee": 0.85,
+        "strength": 12.0,
+        "power": 1.5,
+        "note": "fallback when no segmentation masks exist for the sweep"
+      },
+      "stats": {
+        "finite": true,
+        "boost_mode": "blind",
+        "boost_pixel_fraction": 0.013306379318237305,
+        "boost_max_factor": 1.6971368789672852,
+        "env_base_mean_luma": 0.4993205964565277,
+        "irradiance_mean_luma": 0.4888363778591156,
+        "mip_mean_luma": [
+          0.4993206262588501,
+          0.4972052574157715,
+          0.49196550250053406,
+          0.4893791377544403,
+          0.48872098326683044
+        ]
+      }
+    },
+    {
+      "sweep_uuid": "802dd7438db243808716cce6f89b567d",
+      "index": 62,
+      "irradiance": "802dd7438db243808716cce6f89b567d/irradiance.npy",
+      "specular_mips": [
+        "802dd7438db243808716cce6f89b567d/specular_mip0.npy",
+        "802dd7438db243808716cce6f89b567d/specular_mip1.npy",
+        "802dd7438db243808716cce6f89b567d/specular_mip2.npy",
+        "802dd7438db243808716cce6f89b567d/specular_mip3.npy",
+        "802dd7438db243808716cce6f89b567d/specular_mip4.npy"
+      ],
+      "roughness_per_mip": [
+        0.0,
+        0.25,
+        0.5,
+        0.75,
+        1.0
+      ],
+      "params": {
+        "diffuse_size": 64,
+        "irr_source_size": 32,
+        "spec_size": 256,
+        "spec_mips": 5
+      },
+      "boost": {
+        "mode": "blind",
+        "knee": 0.85,
+        "strength": 12.0,
+        "power": 1.5,
+        "note": "fallback when no segmentation masks exist for the sweep"
+      },
+      "stats": {
+        "finite": true,
+        "boost_mode": "blind",
+        "boost_pixel_fraction": 0.04698243737220764,
+        "boost_max_factor": 1.6971368789672852,
+        "env_base_mean_luma": 0.5088230967521667,
+        "irradiance_mean_luma": 0.5092350840568542,
+        "mip_mean_luma": [
+          0.5088230967521667,
+          0.509005069732666,
+          0.5091021656990051,
+          0.5091269016265869,
+          0.5091150403022766
+        ]
+      }
+    },
+    {
+      "sweep_uuid": "12a156fc9a1d47b79ed2f6fdc4804278",
+      "index": 63,
+      "irradiance": "12a156fc9a1d47b79ed2f6fdc4804278/irradiance.npy",
+      "specular_mips": [
+        "12a156fc9a1d47b79ed2f6fdc4804278/specular_mip0.npy",
+        "12a156fc9a1d47b79ed2f6fdc4804278/specular_mip1.npy",
+        "12a156fc9a1d47b79ed2f6fdc4804278/specular_mip2.npy",
+        "12a156fc9a1d47b79ed2f6fdc4804278/specular_mip3.npy",
+        "12a156fc9a1d47b79ed2f6fdc4804278/specular_mip4.npy"
+      ],
+      "roughness_per_mip": [
+        0.0,
+        0.25,
+        0.5,
+        0.75,
+        1.0
+      ],
+      "params": {
+        "diffuse_size": 64,
+        "irr_source_size": 32,
+        "spec_size": 256,
+        "spec_mips": 5
+      },
+      "boost": {
+        "mode": "blind",
+        "knee": 0.85,
+        "strength": 12.0,
+        "power": 1.5,
+        "note": "fallback when no segmentation masks exist for the sweep"
+      },
+      "stats": {
+        "finite": true,
+        "boost_mode": "blind",
+        "boost_pixel_fraction": 0.005851944287618001,
+        "boost_max_factor": 1.6971368789672852,
+        "env_base_mean_luma": 0.5029790997505188,
+        "irradiance_mean_luma": 0.4923734664916992,
+        "mip_mean_luma": [
+          0.5029790997505188,
+          0.5004577040672302,
+          0.4951350688934326,
+          0.49286243319511414,
+          0.49225714802742004
+        ]
+      }
+    },
+    {
+      "sweep_uuid": "7f21b9106a5542bbaf5136fa958bc74f",
+      "index": 64,
+      "irradiance": "7f21b9106a5542bbaf5136fa958bc74f/irradiance.npy",
+      "specular_mips": [
+        "7f21b9106a5542bbaf5136fa958bc74f/specular_mip0.npy",
+        "7f21b9106a5542bbaf5136fa958bc74f/specular_mip1.npy",
+        "7f21b9106a5542bbaf5136fa958bc74f/specular_mip2.npy",
+        "7f21b9106a5542bbaf5136fa958bc74f/specular_mip3.npy",
+        "7f21b9106a5542bbaf5136fa958bc74f/specular_mip4.npy"
+      ],
+      "roughness_per_mip": [
+        0.0,
+        0.25,
+        0.5,
+        0.75,
+        1.0
+      ],
+      "params": {
+        "diffuse_size": 64,
+        "irr_source_size": 32,
+        "spec_size": 256,
+        "spec_mips": 5
+      },
+      "boost": {
+        "mode": "blind",
+        "knee": 0.85,
+        "strength": 12.0,
+        "power": 1.5,
+        "note": "fallback when no segmentation masks exist for the sweep"
+      },
+      "stats": {
+        "finite": true,
+        "boost_mode": "blind",
+        "boost_pixel_fraction": 0.010763347148895264,
+        "boost_max_factor": 1.6971368789672852,
+        "env_base_mean_luma": 0.5105038285255432,
+        "irradiance_mean_luma": 0.5021706223487854,
+        "mip_mean_luma": [
+          0.5105038285255432,
+          0.5089967250823975,
+          0.5047234296798706,
+          0.5026006102561951,
+          0.5020520091056824
+        ]
+      }
+    },
+    {
+      "sweep_uuid": "0f5deab389c24499998bd265254d0447",
+      "index": 65,
+      "irradiance": "0f5deab389c24499998bd265254d0447/irradiance.npy",
+      "specular_mips": [
+        "0f5deab389c24499998bd265254d0447/specular_mip0.npy",
+        "0f5deab389c24499998bd265254d0447/specular_mip1.npy",
+        "0f5deab389c24499998bd265254d0447/specular_mip2.npy",
+        "0f5deab389c24499998bd265254d0447/specular_mip3.npy",
+        "0f5deab389c24499998bd265254d0447/specular_mip4.npy"
+      ],
+      "roughness_per_mip": [
+        0.0,
+        0.25,
+        0.5,
+        0.75,
+        1.0
+      ],
+      "params": {
+        "diffuse_size": 64,
+        "irr_source_size": 32,
+        "spec_size": 256,
+        "spec_mips": 5
+      },
+      "boost": {
+        "mode": "blind",
+        "knee": 0.85,
+        "strength": 12.0,
+        "power": 1.5,
+        "note": "fallback when no segmentation masks exist for the sweep"
+      },
+      "stats": {
+        "finite": true,
+        "boost_mode": "blind",
+        "boost_pixel_fraction": 0.006421695152918498,
+        "boost_max_factor": 1.6971368789672852,
+        "env_base_mean_luma": 0.4945126473903656,
+        "irradiance_mean_luma": 0.49806734919548035,
+        "mip_mean_luma": [
+          0.4945126473903656,
+          0.4954940974712372,
+          0.49722015857696533,
+          0.4978145658969879,
+          0.49795016646385193
+        ]
+      }
+    }
+  ]
+}

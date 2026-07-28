@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "coordinate_frame": "runtime_yup",
+  "total_triangles": 112,
+  "rooms": [
+    {
+      "room_id": "s0_room_00",
+      "storey_id": 0,
+      "triangles": 16,
+      "watertight": false,
+      "openings": 1,
+      "inset_fallback": false,
+      "floor_y": -0.0065,
+      "ceiling_y": 3.0068,
+      "area_m2": 27.001
+    },
+    {
+      "room_id": "s0_room_01",
+      "storey_id": 0,
+      "triangles": 48,
+      "watertight": false,
+      "openings": 2,
+      "inset_fallback": false,
+      "floor_y": -0.0021,
+      "ceiling_y": 3.0036,
+      "area_m2": 24.844
+    },
+    {
+      "room_id": "s0_room_02",
+      "storey_id": 0,
+      "triangles": 16,
+      "watertight": false,
+      "openings": 1,
+      "inset_fallback": false,
+      "floor_y": -0.0063,
+      "ceiling_y": 2.7248,
+      "area_m2": 13.509
+    },
+    {
+      "room_id": "s0_room_03",
+      "storey_id": 0,
+      "triangles": 20,
+      "watertight": false,
+      "openings": 1,
+      "inset_fallback": false,
+      "floor_y": -0.0063,
+      "ceiling_y": 2.988,
+      "area_m2": 11.395
+    },
+    {
+      "room_id": "s0_room_04",
+      "storey_id": 0,
+      "triangles": 12,
+      "watertight": true,
+      "openings": 0,
+      "inset_fallback": false,
+      "floor_y": -0.0062,
+      "ceiling_y": 2.7598,
+      "area_m2": 1.916
+    }
+  ]
+}

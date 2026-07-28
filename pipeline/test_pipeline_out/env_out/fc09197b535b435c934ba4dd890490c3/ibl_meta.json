@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "sweep_uuid": "fc09197b535b435c934ba4dd890490c3",
+  "index": 61,
+  "params": {
+    "diffuse_size": 64,
+    "irr_source_size": 32,
+    "spec_size": 256,
+    "spec_mips": 5
+  },
+  "face_order": [
+    "px",
+    "nx",
+    "py",
+    "ny",
+    "pz",
+    "nz"
+  ],
+  "roughness_per_mip": [
+    0.0,
+    0.25,
+    0.5,
+    0.75,
+    1.0
+  ],
+  "boost": {
+    "mode": "blind",
+    "knee": 0.85,
+    "strength": 12.0,
+    "power": 1.5,
+    "note": "fallback when no segmentation masks exist for the sweep"
+  },
+  "files": {
+    "irradiance": "irradiance.npy",
+    "specular_mips": [
+      "specular_mip0.npy",
+      "specular_mip1.npy",
+      "specular_mip2.npy",
+      "specular_mip3.npy",
+      "specular_mip4.npy"
+    ]
+  },
+  "stats": {
+    "finite": true,
+    "boost_mode": "blind",
+    "boost_pixel_fraction": 0.013306379318237305,
+    "boost_max_factor": 1.6971368789672852,
+    "env_base_mean_luma": 0.4993205964565277,
+    "irradiance_mean_luma": 0.4888363778591156,
+    "mip_mean_luma": [
+      0.4993206262588501,
+      0.4972052574157715,
+      0.49196550250053406,
+      0.4893791377544403,
+      0.48872098326683044
+    ]
+  }
+}

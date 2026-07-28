@@ -1,0 +1,851 @@
+{
+  "schema_version": 2,
+  "coordinate_frame": "runtime_yup",
+  "storeys": [
+    {
+      "storey_id": 0,
+      "floor_y": -0.0003,
+      "ceiling_y": 2.988,
+      "sweep_count": 21,
+      "room_count": 5
+    }
+  ],
+  "rooms": [
+    {
+      "room_id": "s0_room_00",
+      "storey_id": 0,
+      "area_m2": 28.202,
+      "polygon_plan": [
+        [
+          -21.4838,
+          14.282
+        ],
+        [
+          -21.4848,
+          7.5143
+        ],
+        [
+          -25.543,
+          7.1971
+        ],
+        [
+          -25.568,
+          14.2827
+        ],
+        [
+          -21.4838,
+          14.282
+        ]
+      ],
+      "edges": [
+        {
+          "p0": [
+            -21.4838,
+            14.282
+          ],
+          "p1": [
+            -21.4848,
+            7.5143
+          ],
+          "thickness_m": null,
+          "wall_planes": [
+            "wall_03",
+            "wall_06",
+            "wall_34"
+          ],
+          "virtual": false,
+          "occlude": true
+        },
+        {
+          "p0": [
+            -21.4848,
+            7.5143
+          ],
+          "p1": [
+            -25.543,
+            7.1971
+          ],
+          "thickness_m": 0.1557,
+          "wall_planes": [
+            "wall_45",
+            "wall_64"
+          ],
+          "virtual": false,
+          "occlude": true
+        },
+        {
+          "p0": [
+            -25.543,
+            7.1971
+          ],
+          "p1": [
+            -25.568,
+            14.2827
+          ],
+          "thickness_m": null,
+          "wall_planes": [
+            "wall_07",
+            "wall_09",
+            "wall_20",
+            "wall_49"
+          ],
+          "virtual": false,
+          "occlude": true
+        },
+        {
+          "p0": [
+            -25.568,
+            14.2827
+          ],
+          "p1": [
+            -21.4838,
+            14.282
+          ],
+          "thickness_m": null,
+          "wall_planes": [
+            "wall_16",
+            "wall_25",
+            "wall_32",
+            "wall_48"
+          ],
+          "virtual": false,
+          "occlude": true
+        }
+      ],
+      "floor_plane": "floor_02",
+      "floor_elevation_y": -0.006519800789418256,
+      "floor_coverage": 0.672,
+      "ceiling_plane": "ceiling_02",
+      "ceiling_elevation_y": 3.006835778594705,
+      "ceiling_coverage": 0.952,
+      "wall_planes": [
+        "wall_03",
+        "wall_06",
+        "wall_07",
+        "wall_09",
+        "wall_16",
+        "wall_20",
+        "wall_25",
+        "wall_32",
+        "wall_34",
+        "wall_36",
+        "wall_37",
+        "wall_43",
+        "wall_44",
+        "wall_45",
+        "wall_46",
+        "wall_48",
+        "wall_49",
+        "wall_57",
+        "wall_59",
+        "wall_64",
+        "wall_65",
+        "wall_83"
+      ],
+      "sweeps": [
+        47,
+        48,
+        49,
+        50,
+        51,
+        52
+      ]
+    },
+    {
+      "room_id": "s0_room_01",
+      "storey_id": 0,
+      "area_m2": 26.016,
+      "polygon_plan": [
+        [
+          -23.4785,
+          1.3327
+        ],
+        [
+          -22.8877,
+          1.3349
+        ],
+        [
+          -22.8878,
+          -3.3233
+        ],
+        [
+          -27.9893,
+          -3.3075
+        ],
+        [
+          -28.0804,
+          -2.4418
+        ],
+        [
+          -28.9821,
+          -2.4015
+        ],
+        [
+          -29.0098,
+          0.3454
+        ],
+        [
+          -28.037,
+          0.3331
+        ],
+        [
+          -27.9828,
+          1.3165
+        ],
+        [
+          -24.3324,
+          1.3297
+        ],
+        [
+          -23.472,
+          0.1564
+        ],
+        [
+          -23.4785,
+          1.3327
+        ]
+      ],
+      "edges": [
+        {
+          "p0": [
+            -23.4785,
+            1.3327
+          ],
+          "p1": [
+            -22.8877,
+            1.3349
+          ],
+          "thickness_m": 0.1106,
+          "wall_planes": [
+            "wall_11",
+            "wall_13",
+            "wall_14",
+            "wall_17",
+            "wall_19",
+            "wall_22",
+            "wall_23",
+            "wall_26",
+            "wall_30",
+            "wall_39"
+          ],
+          "virtual": false,
+          "occlude": true
+        },
+        {
+          "p0": [
+            -22.8877,
+            1.3349
+          ],
+          "p1": [
+            -22.8878,
+            -3.3233
+          ],
+          "thickness_m": null,
+          "wall_planes": [],
+          "virtual": true,
+          "occlude": true
+        },
+        {
+          "p0": [
+            -22.8878,
+            -3.3233
+          ],
+          "p1": [
+            -27.9893,
+            -3.3075
+          ],
+          "thickness_m": null,
+          "wall_planes": [
+            "wall_24",
+            "wall_41",
+            "wall_61"
+          ],
+          "virtual": false,
+          "occlude": true
+        },
+        {
+          "p0": [
+            -27.9893,
+            -3.3075
+          ],
+          "p1": [
+            -28.0804,
+            -2.4418
+          ],
+          "thickness_m": null,
+          "wall_planes": [],
+          "virtual": true,
+          "occlude": true
+        },
+        {
+          "p0": [
+            -28.0804,
+            -2.4418
+          ],
+          "p1": [
+            -28.9821,
+            -2.4015
+          ],
+          "thickness_m": null,
+          "wall_planes": [
+            "wall_55"
+          ],
+          "virtual": false,
+          "occlude": true
+        },
+        {
+          "p0": [
+            -28.9821,
+            -2.4015
+          ],
+          "p1": [
+            -29.0098,
+            0.3454
+          ],
+          "thickness_m": null,
+          "wall_planes": [
+            "wall_27"
+          ],
+          "virtual": false,
+          "occlude": true
+        },
+        {
+          "p0": [
+            -29.0098,
+            0.3454
+          ],
+          "p1": [
+            -28.037,
+            0.3331
+          ],
+          "thickness_m": null,
+          "wall_planes": [
+            "wall_53",
+            "wall_63"
+          ],
+          "virtual": false,
+          "occlude": true
+        },
+        {
+          "p0": [
+            -28.037,
+            0.3331
+          ],
+          "p1": [
+            -27.9828,
+            1.3165
+          ],
+          "thickness_m": null,
+          "wall_planes": [],
+          "virtual": true,
+          "occlude": true
+        },
+        {
+          "p0": [
+            -27.9828,
+            1.3165
+          ],
+          "p1": [
+            -24.3324,
+            1.3297
+          ],
+          "thickness_m": 0.1106,
+          "wall_planes": [
+            "wall_11",
+            "wall_13",
+            "wall_14",
+            "wall_17",
+            "wall_19",
+            "wall_22",
+            "wall_23",
+            "wall_26",
+            "wall_30",
+            "wall_39"
+          ],
+          "virtual": false,
+          "occlude": true
+        },
+        {
+          "p0": [
+            -24.3324,
+            1.3297
+          ],
+          "p1": [
+            -23.472,
+            0.1564
+          ],
+          "thickness_m": null,
+          "wall_planes": [],
+          "virtual": true,
+          "occlude": true
+        },
+        {
+          "p0": [
+            -23.472,
+            0.1564
+          ],
+          "p1": [
+            -23.4785,
+            1.3327
+          ],
+          "thickness_m": null,
+          "wall_planes": [
+            "wall_18",
+            "wall_38"
+          ],
+          "virtual": false,
+          "occlude": true
+        }
+      ],
+      "floor_plane": "floor_03",
+      "floor_elevation_y": -0.002055474924876205,
+      "floor_coverage": 0.466,
+      "ceiling_plane": "ceiling_00",
+      "ceiling_elevation_y": 3.003595073236228,
+      "ceiling_coverage": 0.95,
+      "wall_planes": [
+        "wall_11",
+        "wall_13",
+        "wall_14",
+        "wall_17",
+        "wall_18",
+        "wall_19",
+        "wall_22",
+        "wall_23",
+        "wall_24",
+        "wall_26",
+        "wall_27",
+        "wall_30",
+        "wall_38",
+        "wall_39",
+        "wall_41",
+        "wall_53",
+        "wall_55",
+        "wall_61",
+        "wall_63",
+        "wall_66",
+        "wall_69"
+      ],
+      "sweeps": [
+        58,
+        59,
+        60,
+        61,
+        62,
+        63,
+        64,
+        65
+      ]
+    },
+    {
+      "room_id": "s0_room_02",
+      "storey_id": 0,
+      "area_m2": 14.291,
+      "polygon_plan": [
+        [
+          -20.4648,
+          10.5147
+        ],
+        [
+          -15.306,
+          10.5068
+        ],
+        [
+          -15.3383,
+          7.7411
+        ],
+        [
+          -20.4648,
+          7.7224
+        ],
+        [
+          -20.4648,
+          10.5147
+        ]
+      ],
+      "edges": [
+        {
+          "p0": [
+            -20.4648,
+            10.5147
+          ],
+          "p1": [
+            -15.306,
+            10.5068
+          ],
+          "thickness_m": null,
+          "wall_planes": [
+            "wall_00",
+            "wall_05",
+            "wall_33"
+          ],
+          "virtual": false,
+          "occlude": true
+        },
+        {
+          "p0": [
+            -15.306,
+            10.5068
+          ],
+          "p1": [
+            -15.3383,
+            7.7411
+          ],
+          "thickness_m": null,
+          "wall_planes": [
+            "wall_02",
+            "wall_10"
+          ],
+          "virtual": false,
+          "occlude": true
+        },
+        {
+          "p0": [
+            -15.3383,
+            7.7411
+          ],
+          "p1": [
+            -20.4648,
+            7.7224
+          ],
+          "thickness_m": null,
+          "wall_planes": [
+            "wall_08",
+            "wall_15",
+            "wall_51",
+            "wall_56"
+          ],
+          "virtual": false,
+          "occlude": true
+        },
+        {
+          "p0": [
+            -20.4648,
+            7.7224
+          ],
+          "p1": [
+            -20.4648,
+            10.5147
+          ],
+          "thickness_m": null,
+          "wall_planes": [
+            "wall_28"
+          ],
+          "virtual": false,
+          "occlude": true
+        }
+      ],
+      "floor_plane": "floor_00",
+      "floor_elevation_y": -0.006313515421859247,
+      "floor_coverage": 0.933,
+      "ceiling_plane": "other_00",
+      "ceiling_elevation_y": 2.7248,
+      "ceiling_coverage": 0.011,
+      "wall_planes": [
+        "wall_00",
+        "wall_02",
+        "wall_05",
+        "wall_08",
+        "wall_10",
+        "wall_15",
+        "wall_28",
+        "wall_33",
+        "wall_45",
+        "wall_51",
+        "wall_56",
+        "wall_64",
+        "wall_67"
+      ],
+      "sweeps": [
+        45
+      ]
+    },
+    {
+      "room_id": "s0_room_03",
+      "storey_id": 0,
+      "area_m2": 12.561,
+      "polygon_plan": [
+        [
+          -28.0781,
+          1.3161
+        ],
+        [
+          -28.0989,
+          6.9974
+        ],
+        [
+          -26.7137,
+          7.1056
+        ],
+        [
+          -25.8183,
+          7.1016
+        ],
+        [
+          -25.9906,
+          1.3237
+        ],
+        [
+          -28.0781,
+          1.3161
+        ]
+      ],
+      "edges": [
+        {
+          "p0": [
+            -28.0781,
+            1.3161
+          ],
+          "p1": [
+            -28.0989,
+            6.9974
+          ],
+          "thickness_m": null,
+          "wall_planes": [
+            "wall_04",
+            "wall_35",
+            "wall_52",
+            "wall_62"
+          ],
+          "virtual": false,
+          "occlude": true
+        },
+        {
+          "p0": [
+            -28.0989,
+            6.9974
+          ],
+          "p1": [
+            -26.7137,
+            7.1056
+          ],
+          "thickness_m": 0.1557,
+          "wall_planes": [
+            "wall_45",
+            "wall_64"
+          ],
+          "virtual": false,
+          "occlude": true
+        },
+        {
+          "p0": [
+            -26.7137,
+            7.1056
+          ],
+          "p1": [
+            -25.8183,
+            7.1016
+          ],
+          "thickness_m": null,
+          "wall_planes": [
+            "wall_37"
+          ],
+          "virtual": false,
+          "occlude": true
+        },
+        {
+          "p0": [
+            -25.8183,
+            7.1016
+          ],
+          "p1": [
+            -25.9906,
+            1.3237
+          ],
+          "thickness_m": 0.2169,
+          "wall_planes": [
+            "wall_50",
+            "wall_80"
+          ],
+          "virtual": false,
+          "occlude": true
+        },
+        {
+          "p0": [
+            -25.9906,
+            1.3237
+          ],
+          "p1": [
+            -28.0781,
+            1.3161
+          ],
+          "thickness_m": 0.1106,
+          "wall_planes": [
+            "wall_11",
+            "wall_13",
+            "wall_14",
+            "wall_17",
+            "wall_19",
+            "wall_22",
+            "wall_23",
+            "wall_26",
+            "wall_30",
+            "wall_39"
+          ],
+          "virtual": false,
+          "occlude": true
+        }
+      ],
+      "floor_plane": "floor_00",
+      "floor_elevation_y": -0.006313515421859247,
+      "floor_coverage": 0.102,
+      "ceiling_plane": null,
+      "ceiling_elevation_y": null,
+      "ceiling_coverage": 0.0,
+      "wall_planes": [
+        "wall_04",
+        "wall_11",
+        "wall_13",
+        "wall_14",
+        "wall_17",
+        "wall_19",
+        "wall_22",
+        "wall_23",
+        "wall_26",
+        "wall_30",
+        "wall_35",
+        "wall_36",
+        "wall_37",
+        "wall_39",
+        "wall_43",
+        "wall_44",
+        "wall_45",
+        "wall_46",
+        "wall_50",
+        "wall_52",
+        "wall_59",
+        "wall_62",
+        "wall_64",
+        "wall_65",
+        "wall_80"
+      ],
+      "sweeps": [
+        54,
+        57
+      ]
+    },
+    {
+      "room_id": "s0_room_04",
+      "storey_id": 0,
+      "area_m2": 2.227,
+      "polygon_plan": [
+        [
+          -21.4844,
+          10.5162
+        ],
+        [
+          -20.4648,
+          10.5147
+        ],
+        [
+          -20.4648,
+          8.3106
+        ],
+        [
+          -21.4847,
+          8.3531
+        ],
+        [
+          -21.4844,
+          10.5162
+        ]
+      ],
+      "edges": [
+        {
+          "p0": [
+            -21.4844,
+            10.5162
+          ],
+          "p1": [
+            -20.4648,
+            10.5147
+          ],
+          "thickness_m": null,
+          "wall_planes": [
+            "wall_00",
+            "wall_05",
+            "wall_33"
+          ],
+          "virtual": false,
+          "occlude": true
+        },
+        {
+          "p0": [
+            -20.4648,
+            10.5147
+          ],
+          "p1": [
+            -20.4648,
+            8.3106
+          ],
+          "thickness_m": null,
+          "wall_planes": [
+            "wall_28"
+          ],
+          "virtual": false,
+          "occlude": true
+        },
+        {
+          "p0": [
+            -20.4648,
+            8.3106
+          ],
+          "p1": [
+            -21.4847,
+            8.3531
+          ],
+          "thickness_m": null,
+          "wall_planes": [
+            "wall_85"
+          ],
+          "virtual": false,
+          "occlude": true
+        },
+        {
+          "p0": [
+            -21.4847,
+            8.3531
+          ],
+          "p1": [
+            -21.4844,
+            10.5162
+          ],
+          "thickness_m": null,
+          "wall_planes": [
+            "wall_03",
+            "wall_06",
+            "wall_34"
+          ],
+          "virtual": false,
+          "occlude": true
+        }
+      ],
+      "floor_plane": "floor_01",
+      "floor_elevation_y": -0.0061827787955904346,
+      "floor_coverage": 0.825,
+      "ceiling_plane": "ceiling_09",
+      "ceiling_elevation_y": 2.7598448779813833,
+      "ceiling_coverage": 0.875,
+      "wall_planes": [
+        "wall_00",
+        "wall_03",
+        "wall_05",
+        "wall_06",
+        "wall_28",
+        "wall_33",
+        "wall_34",
+        "wall_85"
+      ],
+      "sweeps": [
+        46
+      ]
+    }
+  ],
+  "exterior_floors": [],
+  "build_params": {
+    "planes": "C:\\Users\\achou\\Documents\\GitHub\\virtual_staging_final_version\\pipeline\\test_pipeline_out\\planes_out\\structural_planes.json",
+    "close_file": null,
+    "manual_wall_count": 0,
+    "min_pair_thickness_m": 0.045
+  }
+}
