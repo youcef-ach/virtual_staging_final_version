@@ -49,16 +49,17 @@ def compress_glb(input_path: Path, output_path: Path, has_draco: bool) -> bool:
 
 
 def compress_texture_ktx2(input_path: Path, output_path: Path, has_ktx2: bool) -> bool:
-    """Compress EXR or PNG texture to KTX2 UASTC using toktx."""
+    """Compress EXR or PNG texture to KTX2 UASTC using ktx tool."""
     if not has_ktx2:
         return False
     try:
-        # --t2 for KTX2, --uastc for universal ASTC, --zcmp for supercompression
-        cmd = ["toktx", "--t2", "--uastc", "3", "--zcmp", "15", str(output_path), str(input_path)]
+        # ktx v4.3+ syntax
+        fmt = "R16G16B16A16_SFLOAT" if input_path.suffix.lower() == ".exr" else "R8G8B8_SRGB"
+        cmd = ["ktx", "create", "--format", fmt, "--encode", "uastc", "--uastc-quality", "3", "--zstd", "15", str(input_path), str(output_path)]
         subprocess.run(cmd, check=True, capture_output=True, text=True)
         return True
     except Exception as e:
-        logger.warning("toktx failed for %s: %s", input_path.name, e)
+        logger.warning("ktx create failed for %s: %s", input_path.name, e)
         return False
 
 def _process_cubemap_face(args):
@@ -86,7 +87,7 @@ def publish_property(property_dir: Path, output_dir: Path) -> None:
         raise FileNotFoundError(f"Missing proxy_out in {property_dir}")
 
     has_draco = check_tool("gltf-transform")
-    has_ktx2 = check_tool("toktx")
+    has_ktx2 = check_tool("ktx", "--version")
 
     logger.info("Compression tools - Draco (gltf-transform): %s, KTX2 (toktx): %s", has_draco, has_ktx2)
 
