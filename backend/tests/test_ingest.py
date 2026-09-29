@@ -39,10 +39,10 @@ def client(tmp_path, monkeypatch):
 
 
 def _create_property(client: TestClient) -> dict:
-    org = client.post("/organizations", json={"name": "Acme Realty"})
+    org = client.post("/api/organizations", json={"name": "Acme Realty"})
     assert org.status_code == 201
     prop = client.post(
-        "/properties", json={"organization_id": org.json()["id"], "name": "Test Home"}
+        "/api/properties", json={"organization_id": org.json()["id"], "name": "Test Home"}
     )
     assert prop.status_code == 201
     return prop.json()
@@ -53,7 +53,7 @@ def test_upload_registers_ingested_version(client, tmp_path):
     payload = b"fake e57 content for checksum test"
 
     response = client.post(
-        f"/properties/{prop['id']}/scan-versions",
+        f"/api/properties/{prop['id']}/scan-versions",
         files=[("e57_files", ("cloud_0.e57", payload, "application/octet-stream"))],
     )
     assert response.status_code == 201
@@ -82,12 +82,12 @@ def test_new_version_demotes_previous_authoritative(client):
     prop = _create_property(client)
     for _ in range(2):
         response = client.post(
-            f"/properties/{prop['id']}/scan-versions",
+            f"/api/properties/{prop['id']}/scan-versions",
             files=[("e57_files", ("cloud_0.e57", b"scan bytes", "application/octet-stream"))],
         )
         assert response.status_code == 201
 
-    listing = client.get(f"/properties/{prop['id']}/scan-versions").json()
+    listing = client.get(f"/api/properties/{prop['id']}/scan-versions").json()
     assert [v["version"] for v in listing] == [1, 2]
     assert [v["is_authoritative"] for v in listing] == [False, True]
 
@@ -95,7 +95,7 @@ def test_new_version_demotes_previous_authoritative(client):
 def test_rejects_wrong_extension(client):
     prop = _create_property(client)
     response = client.post(
-        f"/properties/{prop['id']}/scan-versions",
+        f"/api/properties/{prop['id']}/scan-versions",
         files=[("e57_files", ("notes.txt", b"nope", "text/plain"))],
     )
     assert response.status_code == 422
@@ -103,7 +103,7 @@ def test_rejects_wrong_extension(client):
 
 def test_unknown_property_returns_404(client):
     response = client.post(
-        "/properties/00000000-0000-0000-0000-000000000000/scan-versions",
+        "/api/properties/00000000-0000-0000-0000-000000000000/scan-versions",
         files=[("e57_files", ("cloud_0.e57", b"x", "application/octet-stream"))],
     )
     assert response.status_code == 404

@@ -21,6 +21,9 @@ def client(tmp_path, monkeypatch):
     )
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
+    import app.db
+    app.db._engine = engine
+    app.db._session_factory = factory
 
     application = create_app()
 
@@ -34,6 +37,8 @@ def client(tmp_path, monkeypatch):
     application.dependency_overrides[get_db] = override
     with TestClient(application) as test_client:
         yield test_client
+    app.db._engine = None
+    app.db._session_factory = None
     get_settings.cache_clear()
 
 
@@ -100,7 +105,7 @@ def test_share_links_flow(client: TestClient) -> None:
     )
     org_id = reg_res.json()["user"]["organization_id"]
 
-    prop_res = client.post("/properties", json={"organization_id": org_id, "name": "Sunset Villa"})
+    prop_res = client.post("/api/properties", json={"organization_id": org_id, "name": "Sunset Villa"})
     prop_id = prop_res.json()["id"]
 
     # 2. Create staging project in DB directly via helper or endpoint

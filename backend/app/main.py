@@ -50,6 +50,7 @@ def create_app() -> FastAPI:
     fastapi_app.include_router(catalog_router, prefix="/api")
     fastapi_app.include_router(pipeline_router, prefix="/api")
     fastapi_app.include_router(sse_router, prefix="/api")
+    fastapi_app.include_router(share_router)
 
     # Wire Prometheus monitoring (metrics available at /metrics)
     try:
