@@ -31,6 +31,12 @@ cd backend && pip install -e ".[dev]" && uvicorn app.main:app --reload
 cd pipeline && pip install -e ".[dev]" && pytest
 ```
 
+## Presentation demo
+
+From `viewer/`, run `npm ci` and `npm run dev -- --host 127.0.0.1`, then open the printed address with `?demo=1`. Explore the synthetic living room, switch viewpoints, compare the panorama with and without the staged chair, or open the 3D cutaway. **Inspect model outputs** compares the same image with real precomputed Mask2Former and SAM results and exposes the run record.
+
+`npm run build:showcase` writes a standalone demo to `viewer/dist-showcase/`. It verifies the generated fixture inventory and packages only the named synthetic assets. The demo uses studio lighting, runs without a backend, and keeps furniture changes in the current session. The default local viewer still loads your data from `viewer/public/data/`.
+
 ## Hard invariant — Coordinate Lock Rule
 
 The E57 origin `(0,0,0)` is preserved unchanged through every stage. One fixed

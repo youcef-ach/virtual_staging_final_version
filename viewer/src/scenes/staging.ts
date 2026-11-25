@@ -78,6 +78,17 @@ export class StagingLayer {
     return this.assetRoot?.rotation.y ?? null;
   }
 
+  setAssetVisible(visible: boolean): void {
+    this.assetRoot?.setEnabled(visible);
+  }
+
+  resetPlacement(camera: FreeCamera): void {
+    if (!this.assetRoot) return;
+    this.assetRoot.rotation.y = 0;
+    this.userPlaced = false;
+    this.placeInFrontOf(camera);
+  }
+
   /** T7: restore asset state from a saved project. */
   restoreAssetState(position: [number, number, number], rotationY: number): void {
     if (!this.assetRoot) return;
@@ -330,7 +341,7 @@ export class StagingLayer {
    * Hidden until toggled (B); N applies rotX-90 if the GLB kept the
    * MatterPak Z-up frame.
    */
-  async loadReference(url: string): Promise<boolean> {
+  async loadReference(url: string, sourceUp: "Y" | "Z" = "Z"): Promise<boolean> {
     try {
       const result = await ImportMeshAsync(url, this.scene);
       const root = new TransformNode("reference-root", this.scene);
@@ -347,12 +358,12 @@ export class StagingLayer {
       }
       // The MatterPak GLB is Z-up; rotate -90° around X to align with
       // Babylon's Y-up scene (empirically confirmed: rotX=270° = -PI/2).
-      root.rotation.x = -Math.PI / 2;
-      this.refZup = true;
+      this.refZup = sourceUp === "Z";
+      if (this.refZup) root.rotation.x = -Math.PI / 2;
       root.setEnabled(false); // B shows it
       this.refRoot = root;
       console.info(
-        `[staging] reference mesh loaded (${result.meshes.length} meshes, Z-up→Y-up applied)`,
+        `[staging] reference mesh loaded (${result.meshes.length} meshes, source ${sourceUp}-up)`,
       );
       return true;
     } catch {

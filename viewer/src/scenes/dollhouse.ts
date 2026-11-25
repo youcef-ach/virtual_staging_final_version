@@ -14,7 +14,7 @@
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
-import { Color3 } from "@babylonjs/core/Maths/math.color";
+import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import type { Scene } from "@babylonjs/core/scene";
 import type { Mesh } from "@babylonjs/core/Meshes/mesh";
@@ -22,6 +22,7 @@ import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh";
 import type { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { FreeCamera } from "@babylonjs/core/Cameras/freeCamera";
 import type { SweepData } from "../data/types";
+import { GROUP_PROXY } from "./staging";
 
 const MARKER_RADIUS = 0.12;
 const ACTIVE_MARKER_RADIUS = 0.18;
@@ -36,7 +37,8 @@ export class DollhouseView {
   private _active = false;
 
   /** Meshes/nodes that were visible before entering dollhouse (to restore). */
-  private savedVisibility: Map<string, boolean> = new Map();
+  private savedVisibility = new Map<TransformNode, boolean>();
+  private previousClearColor: Color4 | null = null;
 
   constructor(scene: Scene) {
     this.scene = scene;
@@ -98,27 +100,23 @@ export class DollhouseView {
     }
 
     this._active = true;
+    this.previousClearColor = this.scene.clearColor.clone();
+    this.scene.clearColor = new Color4(0.87, 0.89, 0.85, 1);
 
-    // Save current visibility of key scene elements.
     this.savedVisibility.clear();
-    for (const name of ["skybox", "shadow-catcher"]) {
-      const mesh = this.scene.getMeshByName(name);
-      if (mesh) {
-        this.savedVisibility.set(name, mesh.isEnabled());
-        mesh.setEnabled(false);
-      }
-    }
-
-    // Hide nav hotspots.
+    const hide = (node: TransformNode) => {
+      this.savedVisibility.set(node, node.isEnabled(false));
+      node.setEnabled(false);
+    };
+    const asset = this.scene.getTransformNodeByName("asset-root");
+    if (asset) hide(asset);
     for (const mesh of this.scene.meshes) {
-      if (mesh.name.startsWith("nav-marker-")) {
-        this.savedVisibility.set(mesh.name, mesh.isEnabled());
-        mesh.setEnabled(false);
-      }
+      if (mesh.name === "skybox" || mesh.name.startsWith("nav-marker-") ||
+        (mesh.renderingGroupId === GROUP_PROXY && !mesh.isDescendantOf(refRoot))) hide(mesh);
     }
 
     // Show reference mesh.
-    this.savedVisibility.set("reference-root", refRoot.isEnabled());
+    this.savedVisibility.set(refRoot, refRoot.isEnabled(false));
     refRoot.setEnabled(true);
 
     // Show sweep markers.
@@ -132,7 +130,7 @@ export class DollhouseView {
     // Create orbit camera targeting the reference mesh centroid.
     const bounds = this.computeRefBounds(refRoot);
     const center = bounds.center;
-    const radius = bounds.radius * 1.5;
+    const radius = bounds.radius * 2.1;
 
     if (!this.orbitCamera) {
       this.orbitCamera = new ArcRotateCamera(
@@ -179,16 +177,10 @@ export class DollhouseView {
     }
 
     // Restore saved visibility.
-    for (const [name, wasEnabled] of this.savedVisibility) {
-      if (name === "reference-root") {
-        const node = this.scene.getTransformNodeByName(name);
-        node?.setEnabled(wasEnabled);
-      } else {
-        const mesh = this.scene.getMeshByName(name);
-        mesh?.setEnabled(wasEnabled);
-      }
-    }
+    for (const [node, wasEnabled] of this.savedVisibility) node.setEnabled(wasEnabled);
     this.savedVisibility.clear();
+    if (this.previousClearColor) this.scene.clearColor = this.previousClearColor;
+    this.previousClearColor = null;
   }
 
   /** Pick a sweep marker at screen coords. Returns the target UUID, or null. */
@@ -209,6 +201,7 @@ export class DollhouseView {
       if ("getBoundingInfo" in node) {
         const mesh = node as AbstractMesh;
         if (mesh.getTotalVertices() > 0) {
+          mesh.computeWorldMatrix(true);
           const bi = mesh.getBoundingInfo();
           const wMin = bi.boundingBox.minimumWorld;
           const wMax = bi.boundingBox.maximumWorld;
